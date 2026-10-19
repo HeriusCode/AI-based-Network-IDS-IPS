@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QMessageBox, QStackedWid
 
 from app.core.config import WINDOW_TITLE
 from app.core.navigation import NAV_ITEMS
+from app.ui.pages.dashboard import DashboardPage
 from app.ui.pages.placeholder import PlaceholderPage
 from app.ui.sidebar import Sidebar
 from app.ui.topbar import Topbar
@@ -13,20 +14,17 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(WINDOW_TITLE)
-        self.resize(1320, 820)
+        self.resize(1536, 960)
         self.setMinimumSize(850, 560)
-
         root = QWidget()
         root.setObjectName("appRoot")
         self.setCentralWidget(root)
         shell = QHBoxLayout(root)
         shell.setContentsMargins(0, 0, 0, 0)
         shell.setSpacing(0)
-
         self.sidebar = Sidebar()
         self.sidebar.page_selected.connect(self.navigate)
         shell.addWidget(self.sidebar)
-
         right = QWidget()
         right.setObjectName("rightPane")
         right_layout = QVBoxLayout(right)
@@ -36,11 +34,11 @@ class MainWindow(QMainWindow):
         self.topbar.settings_requested.connect(lambda: self.navigate("settings"))
         self.topbar.notifications_requested.connect(self.show_notifications)
         right_layout.addWidget(self.topbar)
-
         self.pages = QStackedWidget()
         self._page_index: dict[str, int] = {}
         for item in NAV_ITEMS:
-            self._page_index[item.key] = self.pages.addWidget(PlaceholderPage(item))
+            page = DashboardPage() if item.key == "dashboard" else PlaceholderPage(item)
+            self._page_index[item.key] = self.pages.addWidget(page)
         right_layout.addWidget(self.pages, 1)
         shell.addWidget(right, 1)
         self.navigate("dashboard")
@@ -53,9 +51,7 @@ class MainWindow(QMainWindow):
         self.topbar.set_page_title(next(item.title for item in NAV_ITEMS if item.key == key))
 
     def show_notifications(self) -> None:
-        QMessageBox.information(
-            self, "Thông báo", "Chưa có thông báo. Cảnh báo mô phỏng sẽ xuất hiện từ Bước 2."
-        )
+        QMessageBox.information(self, "Thông báo", "Bạn có 3 cảnh báo an ninh mới trong dữ liệu mô phỏng.")
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

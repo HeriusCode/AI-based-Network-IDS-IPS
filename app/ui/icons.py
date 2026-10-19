@@ -19,6 +19,12 @@ PATHS = {
     "menu": '<path d="M4 6h16M4 12h16M4 18h16"/>',
     "chevron": '<path d="m9 18 6-6-6-6"/>',
     "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    "search": '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
+    "box": '<path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 7 9 5 9-5M3 7v10l9 5 9-5V7M12 12v10"/>',
+    "warning": '<path d="M10.3 3.7 1.8 18.4A2 2 0 0 0 3.5 21h17a2 2 0 0 0 1.7-2.6L13.7 3.7a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/>',
+    "blocked": '<circle cx="12" cy="12" r="9"/><path d="m7 7 10 10M17 7 7 17"/>',
+    "logout": '<path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h10"/>',
+    "user": '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
 }
 
 

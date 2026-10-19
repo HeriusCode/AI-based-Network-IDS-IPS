@@ -1,7 +1,7 @@
-"""Current page, honest demo status and global actions."""
+"""Search, service status, clock and global actions."""
 
-from PySide6.QtCore import QDateTime, Qt, QTimer, QTimeZone, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtCore import QDateTime, QSize, Qt, QTimer, QTimeZone, Signal
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from app.ui.icons import icon
 
@@ -13,59 +13,67 @@ class Topbar(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("topbar")
-        self.setFixedHeight(76)
+        self.setFixedHeight(72)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(28, 0, 28, 0)
-        layout.setSpacing(12)
-
-        self.title = QLabel("Dashboard")
-        self.title.setObjectName("topbarTitle")
-        layout.addWidget(self.title)
+        layout.setContentsMargins(82, 0, 24, 0)
+        layout.setSpacing(14)
+        self.search = QLineEdit()
+        self.search.setObjectName("globalSearch")
+        self.search.setPlaceholderText("Tìm kiếm...")
+        self.search.addAction(icon("search", "#8299B7"), QLineEdit.ActionPosition.LeadingPosition)
+        self.search.setFixedWidth(380)
+        self.search.setClearButtonEnabled(True)
+        layout.addWidget(self.search)
         layout.addStretch(1)
-
-        self.demo_status = QLabel("●  DEMO MODE")
-        self.demo_status.setObjectName("demoStatus")
-        layout.addWidget(self.demo_status, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.backend_status = QLabel("●  Backend disconnected")
-        self.backend_status.setObjectName("backendStatus")
-        self.backend_status.setToolTip("Chưa cấu hình kết nối backend; dữ liệu hiện tại chỉ là demo.")
-        layout.addWidget(self.backend_status, 0, Qt.AlignmentFlag.AlignVCenter)
-
+        self.demo_status = QLabel("●  Hệ thống: <b>Đang hoạt động</b>")
+        self.demo_status.setObjectName("liveStatus")
+        layout.addWidget(self.demo_status)
+        self.backend_status = QLabel("☁  Kết nối: <b>Online</b>")
+        self.backend_status.setObjectName("onlineStatus")
+        self.backend_status.setToolTip("Trạng thái mô phỏng; chưa có kết nối backend thực tế.")
+        layout.addWidget(self.backend_status)
+        clock_icon = QLabel()
+        clock_icon.setPixmap(icon("clock", "#9FB8D8", 20).pixmap(20, 20))
+        layout.addWidget(clock_icon)
+        clock_box = QVBoxLayout()
+        clock_box.setSpacing(0)
         self.clock = QLabel()
         self.clock.setObjectName("topbarClock")
-        layout.addWidget(self.clock, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.date = QLabel()
+        self.date.setObjectName("topbarDate")
+        clock_box.addWidget(self.clock)
+        clock_box.addWidget(self.date)
+        layout.addLayout(clock_box)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._update_clock)
         self._timer.start(1000)
         self._update_clock()
-
         self.notification_button = QPushButton()
-        self.notification_button.setObjectName("iconButton")
-        self.notification_button.setIcon(icon("bell", "#CBD5E1"))
+        self.notification_button.setObjectName("topIconButton")
+        self.notification_button.setIcon(icon("bell", "#AFC5E2"))
+        self.notification_button.setIconSize(QSize(21, 21))
         self.notification_button.setToolTip("Thông báo")
-        self.notification_button.setAccessibleName("Thông báo")
-        self.notification_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.notification_button.clicked.connect(self.notifications_requested)
-        layout.addWidget(self.notification_button, 0, Qt.AlignmentFlag.AlignVCenter)
-
+        layout.addWidget(self.notification_button)
         self.settings_button = QPushButton()
-        self.settings_button.setObjectName("iconButton")
-        self.settings_button.setIcon(icon("settings", "#CBD5E1"))
-        self.settings_button.setToolTip("Mở Settings")
-        self.settings_button.setAccessibleName("Mở Settings")
-        self.settings_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.settings_button.setObjectName("topIconButton")
+        self.settings_button.setIcon(icon("settings", "#AFC5E2"))
+        self.settings_button.setIconSize(QSize(21, 21))
+        self.settings_button.setToolTip("Mở cài đặt")
         self.settings_button.clicked.connect(self.settings_requested)
-        layout.addWidget(self.settings_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self.settings_button)
+        self.title = QLabel("Dashboard")
+        self.title.hide()
 
     def set_page_title(self, title: str) -> None:
         self.title.setText(title)
 
     def set_compact(self, compact: bool) -> None:
+        self.search.setFixedWidth(250 if compact else 380)
         self.backend_status.setVisible(not compact)
-        self.demo_status.setText("●  DEMO" if compact else "●  DEMO MODE")
-        self.clock.setVisible(not compact)
+        self.demo_status.setVisible(not compact)
 
     def _update_clock(self) -> None:
-        bangkok = QTimeZone(b"Asia/Bangkok")
-        now = QDateTime.currentDateTimeUtc().toTimeZone(bangkok)
-        self.clock.setText(now.toString("dd/MM/yyyy  HH:mm:ss 'ICT'"))
+        now = QDateTime.currentDateTimeUtc().toTimeZone(QTimeZone(b"Asia/Bangkok"))
+        self.clock.setText(now.toString("HH:mm:ss"))
+        self.date.setText(now.toString("ddd, dd/MM/yyyy"))

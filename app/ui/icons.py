@@ -25,6 +25,10 @@ PATHS = {
     "blocked": '<circle cx="12" cy="12" r="9"/><path d="m7 7 10 10M17 7 7 17"/>',
     "logout": '<path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h10"/>',
     "user": '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    "minimize": '<path d="M5 12h14"/>',
+    "maximize": '<rect x="5" y="5" width="14" height="14" rx="1"/>',
+    "restore": '<path d="M8 8V5h11v11h-3"/><rect x="5" y="8" width="11" height="11" rx="1"/>',
+    "close": '<path d="m6 6 12 12M18 6 6 18"/>',
 }
 
 

@@ -1,4 +1,4 @@
-"""Application navigation matching the IDS/IPS dashboard reference."""
+
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
@@ -15,6 +15,7 @@ class Sidebar(QFrame):
         self.setObjectName("sidebar")
         self.setFixedWidth(248)
         self._collapsed = False
+        self._selected = "dashboard"
         self._buttons: dict[str, QPushButton] = {}
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 16, 0, 16)
@@ -28,7 +29,7 @@ class Sidebar(QFrame):
         self.logo.setFixedSize(50, 50)
         self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         brand.addWidget(self.logo)
-        self.brand_text = QLabel("AI Network IDS/IPS\n<span>AI-based Network Intrusion Detection<br>and Prevention System</span>")
+        self.brand_text = QLabel("AI Network IDS/IPS")
         self.brand_text.setObjectName("brandText")
         self.brand_text.setTextFormat(Qt.TextFormat.RichText)
         brand.addWidget(self.brand_text, 1)
@@ -43,9 +44,10 @@ class Sidebar(QFrame):
         divider.setFixedHeight(1)
         outer.addWidget(divider)
 
-        account = QFrame()
-        account.setObjectName("accountCard")
-        account_layout = QHBoxLayout(account)
+        self.account = QFrame()
+        self.account.setObjectName("accountCard")
+        self.account.setFixedHeight(72)
+        account_layout = QHBoxLayout(self.account)
         account_layout.setContentsMargins(22, 10, 18, 8)
         avatar = QLabel()
         avatar.setObjectName("avatar")
@@ -63,7 +65,7 @@ class Sidebar(QFrame):
         self.collapse_button.setToolTip("Thu gọn thanh điều hướng")
         self.collapse_button.clicked.connect(self.toggle_collapsed)
         account_layout.addWidget(self.collapse_button)
-        outer.addWidget(account)
+        outer.addWidget(self.account)
         self.select("dashboard")
 
     def _make_button(self, key: str, title: str) -> QPushButton:
@@ -73,13 +75,14 @@ class Sidebar(QFrame):
         button.setIconSize(QSize(23, 23))
         button.setMinimumHeight(54)
         button.setToolTip(title)
-        button.clicked.connect(lambda checked=False, page=key: self.page_selected.emit(page))
+        button.clicked.connect(lambda checked=False, page=key: self._activate(page))
         self._buttons[key] = button
         return button
 
     def select(self, key: str) -> None:
         if key not in self._buttons:
             return
+        self._selected = key
         for item in NAV_ITEMS:
             button = self._buttons[item.key]
             active = item.key == key
@@ -88,12 +91,20 @@ class Sidebar(QFrame):
             button.style().unpolish(button)
             button.style().polish(button)
 
+    def _activate(self, key: str) -> None:
+        """Navigate and toggle the sidebar, so every menu tab can open/close it."""
+        self.page_selected.emit(key)
+        self.toggle_collapsed()
+
     def toggle_collapsed(self) -> None:
-        self._collapsed = not self._collapsed
-        self.setFixedWidth(76 if self._collapsed else 248)
-        self.brand_text.setVisible(not self._collapsed)
-        self.account_text.setVisible(not self._collapsed)
+        self.set_collapsed(not self._collapsed)
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        self._collapsed = collapsed
+        self.setFixedWidth(76 if collapsed else 248)
+        self.brand_text.setVisible(not collapsed)
+        self.account_text.setVisible(not collapsed)
         for item in NAV_ITEMS:
-            self._buttons[item.key].setText("" if self._collapsed else item.title)
-        self.collapse_button.setIcon(icon("chevron" if self._collapsed else "logout", "#9CB1CC"))
-        self.collapse_button.setToolTip("Mở rộng thanh điều hướng" if self._collapsed else "Thu gọn thanh điều hướng")
+            self._buttons[item.key].setText("" if collapsed else item.title)
+        self.collapse_button.setIcon(icon("chevron" if collapsed else "logout", "#9CB1CC"))
+        self.collapse_button.setToolTip("Mở rộng thanh điều hướng" if collapsed else "Thu gọn thanh điều hướng")

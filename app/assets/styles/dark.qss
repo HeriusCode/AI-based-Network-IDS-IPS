@@ -1,6 +1,7 @@
 * { font-family: "Segoe UI", "Inter", sans-serif; color: #E7EEF8; }
-QMainWindow, #appRoot, #rightPane, #pageContent, #pageScroll,
+QMainWindow, #rightPane, #pageContent, #pageScroll,
 #dashboardContent, #dashboardScroll { background: #071423; }
+#appRoot { background: #071423; border: 1px solid #29445D; }
 QScrollArea { border: none; }
 QScrollBar:vertical { background: #071423; width: 8px; margin: 0; }
 QScrollBar::handle:vertical { background: #2B4059; border-radius: 4px; min-height: 32px; }
@@ -31,13 +32,20 @@ QLineEdit#globalSearch {
     border-radius: 8px; color: #DDE9F6; font-size: 12px;
 }
 QLineEdit#globalSearch:focus { border-color: #3B9FFF; }
-#liveStatus, #onlineStatus { background: #0C1C2D; border-radius: 8px; padding: 9px 10px; font-size: 10px; }
+#liveStatus, #onlineStatus { background: #0C1C2D; border-radius: 6px; padding: 0 7px; font-size: 9px; }
 #liveStatus { color: #31DE91; }
 #onlineStatus { color: #62BBFF; }
-#topbarClock { color: #A9C0DD; font-size: 12px; font-weight: 600; }
-#topbarDate { color: #8196B1; font-size: 9px; }
-QPushButton#topIconButton { background: transparent; border: none; min-width: 38px; min-height: 38px; border-radius: 8px; }
+#topbarSeparator { background: #1D344A; border: none; }
+#topbarClock { color: #BFD3EA; font-size: 11px; font-weight: 600; }
+#topbarDate { color: #8196B1; font-size: 8px; }
+QPushButton#topIconButton { background: transparent; border: none; min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px; border-radius: 7px; }
 QPushButton#topIconButton:hover { background: #172C42; }
+QPushButton#windowButton, QPushButton#closeWindowButton {
+    background: transparent; border: none; min-width: 31px; max-width: 31px;
+    min-height: 34px; max-height: 34px; border-radius: 5px;
+}
+QPushButton#windowButton:hover { background: #1B334A; }
+QPushButton#closeWindowButton:hover { background: #D84252; }
 
 #dashboardHeading { color: #F5F8FC; font-size: 27px; font-weight: 700; }
 #dashboardSubheading { color: #93A6BF; font-size: 12px; padding-bottom: 5px; }

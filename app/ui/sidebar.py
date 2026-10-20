@@ -7,6 +7,17 @@ from app.core.navigation import NAV_ITEMS
 from app.ui.icons import icon
 
 
+class ClickableLabel(QLabel):
+    clicked = Signal()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
 class Sidebar(QFrame):
     page_selected = Signal(str)
 
@@ -24,14 +35,20 @@ class Sidebar(QFrame):
         brand = QHBoxLayout()
         brand.setContentsMargins(24, 0, 16, 0)
         brand.setSpacing(12)
-        self.logo = QLabel()
+        self.logo = ClickableLabel()
         self.logo.setPixmap(icon("logo", "#3DA5FF", 44).pixmap(44, 44))
         self.logo.setFixedSize(50, 50)
         self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.logo.setToolTip("Đóng/mở menu")
+        self.logo.clicked.connect(self.toggle_collapsed)
         brand.addWidget(self.logo)
-        self.brand_text = QLabel("AI Network IDS/IPS")
+        self.brand_text = ClickableLabel("AI Network IDS/IPS")
         self.brand_text.setObjectName("brandText")
         self.brand_text.setTextFormat(Qt.TextFormat.RichText)
+        self.brand_text.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.brand_text.setToolTip("Đóng/mở menu")
+        self.brand_text.clicked.connect(self.toggle_collapsed)
         brand.addWidget(self.brand_text, 1)
         outer.addLayout(brand)
         outer.addSpacing(34)
@@ -92,9 +109,11 @@ class Sidebar(QFrame):
             button.style().polish(button)
 
     def _activate(self, key: str) -> None:
-        """Navigate and toggle the sidebar, so every menu tab can open/close it."""
+        """Only the currently active tab toggles the sidebar."""
+        if key == self._selected:
+            self.toggle_collapsed()
+            return
         self.page_selected.emit(key)
-        self.toggle_collapsed()
 
     def toggle_collapsed(self) -> None:
         self.set_collapsed(not self._collapsed)

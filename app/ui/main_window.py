@@ -7,6 +7,8 @@ from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QMessageBox, QStackedWid
 from app.core.config import WINDOW_TITLE
 from app.core.navigation import NAV_ITEMS
 from app.ui.pages.dashboard import DashboardPage
+from app.ui.pages.detection import DetectionPage
+from app.ui.pages.monitoring import MonitoringPage
 from app.ui.pages.placeholder import PlaceholderPage
 from app.ui.sidebar import Sidebar
 from app.ui.topbar import Topbar
@@ -69,7 +71,14 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         self._page_index: dict[str, int] = {}
         for item in NAV_ITEMS:
-            page = DashboardPage() if item.key == "dashboard" else PlaceholderPage(item)
+            if item.key == "dashboard":
+                page = DashboardPage()
+            elif item.key == "monitoring":
+                page = MonitoringPage()
+            elif item.key == "detection":
+                page = DetectionPage()
+            else:
+                page = PlaceholderPage(item)
             self._page_index[item.key] = self.pages.addWidget(page)
         right_layout.addWidget(self.pages, 1)
         shell.addWidget(right, 1)

@@ -84,3 +84,75 @@ QHeaderView::section { background: #102236; color: #91A5BF; border: none; border
 #featureNumber { color: #60A5FA; font-size: 11px; font-weight: 700; }
 #featureName { color: #CBD5E1; font-size: 12px; font-weight: 600; }
 #footerLabel { color: #64748B; font-size: 10px; }
+
+/* Network monitoring */
+#monitorContent, #monitorScroll { background: #071423; }
+#monitorHeading { color: #F5F8FC; font-size: 26px; font-weight: 700; }
+#monitorSubtitle { color: #94A7C0; font-size: 12px; }
+#controlLabel { color: #9AAEC6; font-size: 10px; }
+#monitorMetric, #monitorPanel { background: #0D1D2E; border: 1px solid #1C3851; border-radius: 9px; }
+#monitorMetric:hover, #monitorPanel:hover { border-color: #285374; }
+#monitorMetricIcon { background: #123052; border-radius: 11px; }
+#monitorMetricTitle { color: #A9B9CB; font-size: 10px; }
+#monitorMetricValue { color: #F5F8FC; font-size: 19px; font-weight: 700; }
+#monitorMetricChange { font-size: 10px; font-weight: 600; }
+#monitorPanelTitle { color: #F3F7FB; font-size: 13px; font-weight: 700; }
+#monitorLegend { color: #A8B8CA; font-size: 9px; }
+QComboBox#monitorCombo, QComboBox#flowCombo {
+    background: #102238; border: 1px solid #29445F; border-radius: 7px;
+    padding: 7px 10px; color: #DCE7F3; font-size: 10px;
+}
+QComboBox#monitorCombo { min-width: 130px; }
+QComboBox#flowCombo { min-width: 102px; }
+QComboBox::drop-down { border: none; width: 20px; }
+QComboBox QAbstractItemView { background: #102238; border: 1px solid #29445F; selection-background-color: #185DA8; }
+QPushButton#primaryMonitorButton, QPushButton#monitorButton, QPushButton#smallMonitorButton {
+    min-height: 34px; border-radius: 7px; padding: 0 12px; font-size: 10px; font-weight: 600;
+}
+QPushButton#primaryMonitorButton { background: #087AE2; border: 1px solid #178DF4; color: #FFFFFF; }
+QPushButton#primaryMonitorButton:hover { background: #128AF1; }
+QPushButton#monitorButton, QPushButton#smallMonitorButton { background: #102238; border: 1px solid #29445F; color: #D7E4F2; }
+QPushButton#monitorButton:hover, QPushButton#smallMonitorButton:hover { background: #19324B; }
+QLineEdit#flowSearch { min-width: 190px; min-height: 31px; background: #0B1A2B; border: 1px solid #29445F; border-radius: 7px; padding: 0 9px; font-size: 9px; }
+QTableWidget#flowTable { background: transparent; border: none; color: #C8D5E4; font-size: 9px; }
+QTableWidget#flowTable::item { border-bottom: 1px solid #183047; padding: 2px 3px; }
+QTableWidget#flowTable::item:selected { background: #153A5B; }
+#flowFooter { color: #8FA4BD; font-size: 9px; }
+QPushButton#pageButton, QPushButton#activePage { min-width: 27px; max-width: 27px; min-height: 27px; border-radius: 6px; font-size: 9px; }
+QPushButton#pageButton { background: #0D1B2C; border: 1px solid #173149; color: #A8B8CA; }
+QPushButton#activePage { background: #1266B8; border: 1px solid #2389E9; color: #FFFFFF; }
+#interfaceCard { background: #0B1B2B; border: 1px solid #19374F; border-radius: 8px; }
+#interfaceName { color: #E7EEF6; font-size: 10px; font-weight: 600; }
+#interfaceUp { color: #20E099; border: 1px solid #18B979; border-radius: 5px; padding: 2px 7px; font-size: 9px; }
+#interfaceSpeed { color: #AFC2D9; font-size: 9px; }
+#ipLabel, #ipValue { color: #BCCBDC; font-size: 9px; }
+QProgressBar#ipBar { background: #172D45; border: none; border-radius: 5px; }
+
+/* Anomaly detection */
+#detectionContent, #detectionScroll { background: #071423; }
+#detectionHeading { color: #F5F8FC; font-size: 26px; font-weight: 700; }
+#detectionSubtitle { color: #A2B3C8; font-size: 12px; }
+QPushButton#dateRangeButton { min-height: 37px; background: #0D1E30; border: 1px solid #29445F; border-radius: 7px; color: #D8E4F1; font-size: 10px; text-align: left; padding: 0 11px; }
+QPushButton#dateRangeButton:hover { background: #142A41; }
+QPushButton#detectionRefresh { min-height: 37px; background: #087AE2; border: 1px solid #178DF4; border-radius: 7px; color: #FFFFFF; font-size: 10px; font-weight: 600; padding: 0 13px; }
+QPushButton#detectionRefresh:hover { background: #128AF1; }
+#attackLegend { color: #B4C2D3; font-size: 9px; }
+QLineEdit#detectionSearch { min-width: 125px; min-height: 31px; background: #0B1A2B; border: 1px solid #29445F; border-radius: 7px; padding: 0 9px; font-size: 9px; }
+QComboBox#detectionCombo { min-width: 115px; background: #102238; border: 1px solid #29445F; border-radius: 7px; padding: 7px 9px; color: #DCE7F3; font-size: 9px; }
+QTableWidget#detectionTable { background: transparent; border: none; color: #CCD8E6; font-size: 9px; }
+QTableWidget#detectionTable::item { border-bottom: 1px solid #183047; padding: 2px 3px; }
+QTableWidget#detectionTable::item:selected { background: #43232E; }
+#detectionDetail { background: #0D1D2E; border: 1px solid #1C3851; border-radius: 9px; }
+#detailAlert { color: #FF5963; background: #351C29; border-radius: 7px; padding: 9px; font-size: 11px; font-weight: 700; }
+#detailSeparator { background: #1D384F; border: none; }
+#detailKey { color: #93A7C1; font-size: 9px; }
+#detailValue { color: #E8EFF7; font-size: 9px; font-weight: 600; }
+#detailSectionTitle { color: #EDF3F9; font-size: 10px; font-weight: 700; padding-top: 6px; }
+#detailDescription { color: #BAC8D9; font-size: 9px; line-height: 1.4; }
+QProgressBar#confidenceBar { background: #193047; border: none; border-radius: 4px; }
+QProgressBar#confidenceBar::chunk { background: #FF4E5B; border-radius: 4px; }
+QPushButton#blockIpButton, QPushButton#viewDetailButton { min-height: 37px; border-radius: 7px; padding: 0 10px; font-size: 9px; font-weight: 600; }
+QPushButton#blockIpButton { background: #F63F4E; border: 1px solid #FF5562; color: #FFFFFF; }
+QPushButton#blockIpButton:hover { background: #FF4D5B; }
+QPushButton#blockIpButton:disabled { background: #58404A; color: #BDAEB3; border-color: #73515C; }
+QPushButton#viewDetailButton { background: #102238; border: 1px solid #29445F; color: #8FCBFF; }

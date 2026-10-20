@@ -29,6 +29,17 @@ PATHS = {
     "maximize": '<rect x="5" y="5" width="14" height="14" rx="1"/>',
     "restore": '<path d="M8 8V5h11v11h-3"/><rect x="5" y="8" width="11" height="11" rx="1"/>',
     "close": '<path d="m6 6 12 12M18 6 6 18"/>',
+    "database": '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
+    "arrow_up": '<path d="M12 20V5M6 11l6-6 6 6"/>',
+    "arrow_down": '<path d="M12 4v15M6 13l6 6 6-6"/>',
+    "refresh": '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 8a7 7 0 0 1 11.7-1L20 12M4 12l2.2 5a7 7 0 0 0 11.7-1"/>',
+    "pause": '<path d="M8 5v14M16 5v14"/>',
+    "download": '<path d="M12 3v12M7 10l5 5 5-5M5 20h14"/>',
+    "bug": '<path d="M8 9h8v8a4 4 0 0 1-8 0V9ZM9 9V7a3 3 0 0 1 6 0v2M4 13h4M16 13h4M5 8l3 2M19 8l-3 2M5 19l3-2M19 19l-3-2M12 12v8"/>',
+    "brain": '<path d="M9 4a3 3 0 0 0-5 2.2A3.5 3.5 0 0 0 4 13a3 3 0 0 0 3 5h2M15 4a3 3 0 0 1 5 2.2 3.5 3.5 0 0 1 0 6.8 3 3 0 0 1-3 5h-2M9 3v18M15 3v18M6 9h3M15 9h3M6 15h3M15 15h3"/>',
+    "siren": '<path d="M6 16h12l-1-8a5 5 0 0 0-10 0l-1 8ZM4 20h16M12 3V1M3 8H1M23 8h-2M5 3 3 1M19 3l2-2"/>',
+    "eye": '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/>',
+    "calendar": '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18"/>',
 }
 
 

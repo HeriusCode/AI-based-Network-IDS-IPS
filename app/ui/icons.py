@@ -40,6 +40,20 @@ PATHS = {
     "siren": '<path d="M6 16h12l-1-8a5 5 0 0 0-10 0l-1 8ZM4 20h16M12 3V1M3 8H1M23 8h-2M5 3 3 1M19 3l2-2"/>',
     "eye": '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/>',
     "calendar": '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18"/>',
+    "speed": '<path d="M4 17a8 8 0 1 1 16 0M12 17l4-6M7 15h.01M17 15h.01M12 9h.01"/>',
+    "edit": '<path d="m4 20 4-1 11-11-3-3L5 16l-1 4ZM14 7l3 3"/>',
+    "trash": '<path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/>',
+    "check": '<path d="m5 12 4 4L19 6"/>',
+    "switch": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 9h10M7 15h10M9 7 7 9l2 2M15 13l2 2-2 2"/>',
+    "server": '<rect x="4" y="3" width="16" height="6" rx="1"/><rect x="4" y="9" width="16" height="6" rx="1"/><rect x="4" y="15" width="16" height="6" rx="1"/><path d="M7 6h.01M7 12h.01M7 18h.01"/>',
+    "monitor": '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+    "firewall": '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 16h18M9 4v6M15 10v6M8 16v4"/>',
+    "cloud": '<path d="M6 19h12a4 4 0 0 0 .5-8A6.5 6.5 0 0 0 6 9a5 5 0 0 0 0 10Z"/>',
+    "expand": '<path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/>',
+    "info": '<circle cx="12" cy="12" r="10"/><path d="M12 11v6M12 7h.01"/>',
+    "palette": '<path d="M12 3a9 9 0 0 0 0 18h1.5a2 2 0 0 0 0-4H12a2 2 0 0 1 0-4h3a6 6 0 0 0-3-10Z"/><circle cx="7" cy="10" r="1"/><circle cx="9" cy="6" r="1"/><circle cx="14" cy="6" r="1"/>',
+    "link": '<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2"/>',
+    "save": '<path d="M5 3h12l2 2v16H5V3Z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/>',
 }
 
 

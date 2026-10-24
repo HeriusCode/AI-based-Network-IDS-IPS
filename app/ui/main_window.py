@@ -7,8 +7,14 @@ from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QMessageBox, QStackedWid
 from app.core.config import WINDOW_TITLE
 from app.core.navigation import NAV_ITEMS
 from app.ui.pages.dashboard import DashboardPage
+from app.ui.pages.alerts import AlertsPage
 from app.ui.pages.detection import DetectionPage
 from app.ui.pages.monitoring import MonitoringPage
+from app.ui.pages.mitigation import MitigationPage
+from app.ui.pages.prediction import PredictionPage
+from app.ui.pages.reports import ReportsPage
+from app.ui.pages.settings import SettingsPage
+from app.ui.pages.topology import TopologyPage
 from app.ui.pages.placeholder import PlaceholderPage
 from app.ui.sidebar import Sidebar
 from app.ui.topbar import Topbar
@@ -77,6 +83,18 @@ class MainWindow(QMainWindow):
                 page = MonitoringPage()
             elif item.key == "detection":
                 page = DetectionPage()
+            elif item.key == "prediction":
+                page = PredictionPage()
+            elif item.key == "mitigation":
+                page = MitigationPage()
+            elif item.key == "topology":
+                page = TopologyPage()
+            elif item.key == "alerts":
+                page = AlertsPage()
+            elif item.key == "reports":
+                page = ReportsPage()
+            elif item.key == "settings":
+                page = SettingsPage()
             else:
                 page = PlaceholderPage(item)
             self._page_index[item.key] = self.pages.addWidget(page)

@@ -299,3 +299,91 @@ QPushButton#settingsSecondaryButton { background: #0D1E30; border: 1px solid #29
 QPushButton#saveSettingsButton { background: #087AE2; border: 1px solid #178DF4; color: #FFFFFF; }
 QPushButton#applySettingsButton { background: #0BBC79; border: 1px solid #1AD991; color: #FFFFFF; }
 #settingsStatus { color: #1DDB91; font-size: 9px; min-height: 12px; }
+
+/* Account registration */
+#registerRoot { background: #04111F; border: 1px solid #29445D; }
+#authTitleBar { background: #07182A; border-bottom: 1px solid #17334B; }
+#authBrandName { color: #F4F7FB; font-size: 16px; font-weight: 700; }
+QPushButton#authWindowButton, QPushButton#authCloseButton {
+    background: transparent; border: none; min-width: 39px; max-width: 39px;
+    min-height: 38px; max-height: 38px; border-radius: 6px;
+}
+QPushButton#authWindowButton:hover { background: #173047; }
+QPushButton#authCloseButton:hover { background: #D84252; }
+#registerCard { background: rgba(5, 21, 39, 245); border: 1px solid #1668AD; border-radius: 20px; }
+#registerBrandPanel { background: rgba(5, 27, 50, 175); border-right: 1px solid #163B5C; border-top-left-radius: 20px; border-bottom-left-radius: 20px; }
+#registerFormScroll, #registerFormScroll > QWidget > QWidget { background: transparent; border: none; }
+#registerFormScroll QScrollBar:vertical { background: #071B30; width: 7px; margin: 4px 0; }
+#registerFormScroll QScrollBar::handle:vertical { background: #245C89; min-height: 28px; border-radius: 3px; }
+#registerFormScroll QScrollBar::add-line:vertical, #registerFormScroll QScrollBar::sub-line:vertical { height: 0; }
+#registerFormPanel { background: rgba(4, 20, 37, 238); border-top-right-radius: 20px; border-bottom-right-radius: 20px; }
+#registerProductTitle { color: #F7F9FC; font-size: 28px; font-weight: 700; }
+#registerProductSubtitle { color: #C6D4E5; font-size: 13px; }
+#registerFeatureIcon { background: rgba(4, 30, 54, 220); border: 1px solid #168EEC; border-radius: 31px; }
+#registerFeatureText { color: #D9E5F2; font-size: 11px; line-height: 1.35; }
+#registerQuote { color: #A9CEFA; background: transparent; border: none; font-size: 12px; font-style: italic; padding: 2px 6px; }
+#registerHeading { color: #F7F9FC; font-size: 25px; font-weight: 700; }
+#registerSubheading { color: #9FB2CB; font-size: 12px; }
+#registerFieldLabel { color: #C9D7E7; font-size: 11px; }
+QLineEdit#registerInput {
+    background: rgba(7, 28, 49, 235); border: 1px solid #245277; border-radius: 7px;
+    color: #E6EEF7; padding: 0 13px; font-size: 11px;
+}
+QLineEdit#registerInput { min-height: 43px; }
+QLineEdit#registerInput:focus { border: 1px solid #269EFF; background: #0A2239; }
+QLineEdit#registerInput::placeholder { color: #637B98; }
+#registerStatus { min-height: 16px; color: #FF6572; font-size: 10px; }
+#registerStatus[valid="true"] { color: #20DE96; }
+QPushButton#registerSubmit {
+    min-height: 45px; background: #118BFA; border: 1px solid #259EFF; border-radius: 7px;
+    color: #FFFFFF; font-size: 12px; font-weight: 600;
+}
+QPushButton#registerSubmit:hover { background: #229CFF; }
+#registerDivider { background: #274058; border: none; }
+#registerOr { color: #8FA4BD; font-size: 10px; padding: 0 9px; }
+QPushButton#registerBack {
+    min-height: 43px; background: transparent; border: 1px solid #1875BC; border-radius: 7px;
+    color: #BFD2E8; font-size: 11px;
+}
+QPushButton#registerBack:hover { background: #0D2A43; }
+
+/* Account login */
+#loginRoot { background: #04111F; border: 1px solid #29445D; }
+#loginBrandPanel { background: transparent; }
+#loginProductTitle { color: #F7F9FC; font-size: 30px; font-weight: 700; }
+#loginProductSubtitle { color: #BFD1E7; font-size: 14px; }
+#loginFeatureIcon { background: rgba(5, 30, 55, 220); border: 1px solid #168EEC; border-radius: 32px; }
+#loginFeatureText { color: #C9DCF2; font-size: 12px; line-height: 1.4; }
+#loginQuote { color: #A9CEFA; font-size: 13px; font-style: italic; padding: 2px 6px; }
+#loginCard {
+    background: rgba(5, 24, 44, 238); border: 1px solid #176EB5; border-radius: 18px;
+}
+#loginHeading { color: #F7F9FC; font-size: 27px; font-weight: 700; }
+#loginSubheading { color: #ABC0DA; font-size: 12px; }
+#loginFieldLabel { color: #D3E0EE; font-size: 12px; }
+QLineEdit#loginInput {
+    min-height: 50px; background: rgba(9, 33, 56, 242); border: 1px solid #28577F;
+    border-radius: 8px; color: #E7F0FA; padding: 0 15px; font-size: 12px;
+}
+QLineEdit#loginInput:focus { border: 1px solid #269EFF; background: #0B2843; }
+QLineEdit#loginInput::placeholder { color: #7188A4; }
+QCheckBox#loginRemember { color: #C8D9EB; font-size: 11px; spacing: 9px; }
+QCheckBox#loginRemember::indicator { width: 18px; height: 18px; border: 1px solid #3378B2; border-radius: 4px; background: #08213A; }
+QCheckBox#loginRemember::indicator:checked { background: #168EFF; border-color: #36A4FF; image: url(none); }
+QPushButton#loginForgot { background: transparent; border: none; color: #25A7FF; font-size: 11px; padding: 4px 0; }
+QPushButton#loginForgot:hover { color: #76CBFF; text-decoration: underline; }
+#loginStatus { min-height: 16px; color: #FF6572; font-size: 10px; }
+#loginStatus[valid="true"] { color: #20DE96; }
+QPushButton#loginSubmit {
+    min-height: 50px; background: #118BFA; border: 1px solid #259EFF; border-radius: 8px;
+    color: #FFFFFF; font-size: 13px; font-weight: 600;
+}
+QPushButton#loginSubmit:hover { background: #229CFF; }
+#loginDivider { background: #304B65; border: none; }
+#loginOr { color: #8FA4BD; font-size: 11px; padding: 0 11px; }
+QPushButton#loginRegister {
+    min-height: 46px; background: transparent; border: 1px solid #1983D2; border-radius: 8px;
+    color: #C5D8EC; font-size: 12px;
+}
+QPushButton#loginRegister:hover { background: #0D2D49; }
+#loginFooter { color: #8198B4; font-size: 9px; }

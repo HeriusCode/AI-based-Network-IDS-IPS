@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import WINDOW_TITLE
+from app.services.auth_service import register_user
 from app.ui.icons import icon
 
 
@@ -229,7 +230,7 @@ class AuthWindowMixin:
 
 
 class RegisterWindow(AuthWindowMixin, QMainWindow):
-    registration_completed = Signal(str)
+    registration_completed = Signal(str, str)
     back_requested = Signal()
 
     def __init__(self) -> None:
@@ -474,12 +475,16 @@ class RegisterWindow(AuthWindowMixin, QMainWindow):
             self.status.setText(error)
             self.status.setProperty("valid", False)
         else:
-            self.status.setText("Đăng ký thành công. Đang mở hệ thống...")
-            self.status.setProperty("valid", True)
-            self.status.style().unpolish(self.status)
-            self.status.style().polish(self.status)
-            self.registration_completed.emit(name)
-            return
+            success, msg, user = register_user(name, email, username, password)
+            if success and user is not None:
+                self.status.setText("Đăng ký thành công! Đang mở hệ thống...")
+                self.status.setProperty("valid", True)
+                self.status.style().unpolish(self.status)
+                self.status.style().polish(self.status)
+                self.registration_completed.emit(user.full_name, user.role)
+                return
+            self.status.setText(msg)
+            self.status.setProperty("valid", False)
         self.status.style().unpolish(self.status)
         self.status.style().polish(self.status)
 

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import WINDOW_TITLE
+from app.services.auth_service import authenticate_user
 from app.ui.icons import icon
 from app.ui.register_window import AuthTitleBar, AuthWindowMixin, NetworkBackground
 
@@ -55,7 +56,7 @@ class LoginBrandPanel(QWidget):
 
 
 class LoginWindow(AuthWindowMixin, QMainWindow):
-    authenticated = Signal(str)
+    authenticated = Signal(str, str)
     register_requested = Signal()
 
     def __init__(self) -> None:
@@ -277,18 +278,28 @@ class LoginWindow(AuthWindowMixin, QMainWindow):
 
     def submit(self) -> None:
         account = self.account.text().strip()
+        password = self.password.text()
         if not account:
             self.status.setText("Vui lòng nhập tài khoản hoặc email.")
             self.status.setProperty("valid", False)
-        elif not self.password.text():
+            self._refresh_status()
+            return
+        if not password:
             self.status.setText("Vui lòng nhập mật khẩu.")
             self.status.setProperty("valid", False)
-        else:
-            self.status.setText("Đăng nhập thành công. Đang mở hệ thống...")
+            self._refresh_status()
+            return
+
+        success, msg, user = authenticate_user(account, password)
+        if success and user is not None:
+            self.status.setText(f"Đăng nhập thành công! Xin chào, {user.full_name}.")
             self.status.setProperty("valid", True)
             self._refresh_status()
-            self.authenticated.emit(account)
+            self.authenticated.emit(user.full_name, user.role)
             return
+
+        self.status.setText(msg)
+        self.status.setProperty("valid", False)
         self._refresh_status()
 
     def _refresh_status(self) -> None:

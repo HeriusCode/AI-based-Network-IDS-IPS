@@ -7,12 +7,23 @@ from PySide6.QtWidgets import QApplication
 
 from app.core.config import APP_NAME
 from app.core.theme import load_stylesheet
+from app.services.auth_service import ensure_default_admin
+from app.services.database import init_db
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow
 from app.ui.register_window import RegisterWindow
 
 
 def main() -> int:
+    # Attempt to initialize PostgreSQL tables and default administrator
+    db_ok, db_msg = init_db()
+    if db_ok:
+        print(f"[Database] {db_msg}")
+        admin_ok, admin_msg = ensure_default_admin()
+        print(f"[Auth] {admin_msg}")
+    else:
+        print(f"[Database] {db_msg}")
+
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setStyle("Fusion")
@@ -63,9 +74,9 @@ def main() -> int:
     def open_login() -> None:
         switch_auth(register, login)
 
-    def open_workspace(display_name: str = "admin") -> None:
+    def open_workspace(display_name: str = "admin", role: str = "Quản trị viên") -> None:
         window = MainWindow()
-        window.sidebar.account_text.setText(f"{display_name}\n<span>Quản trị viên</span>")
+        window.sidebar.account_text.setText(f"{display_name}\n<span>{role}</span>")
         windows["main"] = window
         window.show()
         login.hide()

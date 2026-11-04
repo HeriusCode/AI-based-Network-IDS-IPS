@@ -349,7 +349,14 @@ class SettingsPage(QScrollArea):
 
     def test_connection(self) -> None:
         self.connection_status.setText("●  Đang kiểm tra...")
-        QTimer.singleShot(500, lambda: self.connection_status.setText("●  Kết nối thành công (mô phỏng)"))
+        from app.services.database import test_connection as test_db
+        ok, msg = test_db()
+        if ok:
+            self.connection_status.setText("●  DB: Đã kết nối")
+            self.show_status("Cơ sở dữ liệu PostgreSQL đã sẵn sàng.", True)
+        else:
+            self.connection_status.setText("●  DB: Ngắt kết nối")
+            self.show_status(msg, False)
 
     def restore_defaults(self) -> None:
         self.api_input.setText("http://127.0.0.1:8000")

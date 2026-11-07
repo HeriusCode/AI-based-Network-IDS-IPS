@@ -1,16 +1,18 @@
-"""Presentation-only configuration for the initial desktop shell."""
+"""Global application branding and presentation configuration."""
 
-APP_NAME = "AI Network IDS/IPS"
-WINDOW_TITLE = f"{APP_NAME}  |  SOC Demo"
+APP_NAME = "CYBERA"
+APP_SUBTITLE = "Cybersecurity AI System"
+WINDOW_TITLE = f"{APP_NAME}  •  {APP_SUBTITLE}"
 
 COLORS = {
-    "background": "#0B1120",
-    "sidebar": "#111827",
-    "card": "#1E293B",
-    "blue": "#3B82F6",
-    "green": "#22C55E",
-    "amber": "#F59E0B",
-    "red": "#EF4444",
-    "text": "#F8FAFC",
-    "muted": "#94A3B8",
+    "background": "#131129",
+    "sidebar": "#0F0E21",
+    "card": "#1B1938",
+    "primary": "#6C5DD3",
+    "purple": "#8B5CF6",
+    "green": "#10B981",
+    "amber": "#FF8A4C",
+    "red": "#FF5B79",
+    "text": "#FFFFFF",
+    "muted": "#8E8BA7",
 }

@@ -62,16 +62,83 @@ PATHS = {
 }
 
 
+def _build_cybera_logo_svg(color: str = "#8B5CF6") -> str:
+    """Generate the bespoke CYBERA Neural Shield & AI Core logo in high-precision vector SVG."""
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="cyberaGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#DDD6FE" />
+      <stop offset="45%" stop-color="{color}" />
+      <stop offset="100%" stop-color="#6C5DD3" />
+    </linearGradient>
+    <linearGradient id="cyberaShieldFill" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="{color}" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#6C5DD3" stop-opacity="0.04" />
+    </linearGradient>
+    <linearGradient id="cyberaCoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="55%" stop-color="#C4B5FD" />
+      <stop offset="100%" stop-color="{color}" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Cyber Armor Shield -->
+  <path d="M 32 4.5 L 55 14.5 L 55 31.5 C 55 45.5 44.5 54.5 32 59.5 C 19.5 54.5 9 45.5 9 31.5 L 9 14.5 Z"
+        fill="url(#cyberaShieldFill)"
+        stroke="url(#cyberaGrad1)"
+        stroke-width="3.2"
+        stroke-linejoin="round" />
+
+  <!-- Inner Bevel & Facet Structural Lines -->
+  <path d="M 32 4.5 L 32 19" stroke="{color}" stroke-width="1.8" stroke-linecap="round" opacity="0.65" />
+  <path d="M 32 45 L 32 59.5" stroke="{color}" stroke-width="1.8" stroke-linecap="round" opacity="0.65" />
+  <path d="M 9 14.5 L 21 22.5" stroke="{color}" stroke-width="1.6" stroke-linecap="round" opacity="0.5" />
+  <path d="M 55 14.5 L 43 22.5" stroke="{color}" stroke-width="1.6" stroke-linecap="round" opacity="0.5" />
+
+  <!-- Stylized Cyber 'C' (CYBERA Curve) -->
+  <path d="M 43 21 C 37 15.5 22 16.5 18 26 C 15.5 32 15.5 36 18 40 C 22 49 37 49.5 43 44"
+        stroke="url(#cyberaGrad1)"
+        stroke-width="4.2"
+        stroke-linecap="round"
+        fill="none" />
+
+  <!-- Radiating AI Neural Circuit Traces -->
+  <path d="M 32 23 L 32 17 M 32 41 L 32 47" stroke="#DDD6FE" stroke-width="2" stroke-linecap="round" />
+  <path d="M 23 32 L 18 32 M 41 32 L 48 32" stroke="#DDD6FE" stroke-width="2" stroke-linecap="round" />
+  <path d="M 38 26 L 44 20 M 38 38 L 44 44" stroke="{color}" stroke-width="1.8" stroke-linecap="round" opacity="0.8" />
+
+  <!-- Peripheral Neural Circuit Nodes -->
+  <circle cx="48" cy="32" r="2.6" fill="#FFFFFF" />
+  <circle cx="48" cy="32" r="1.4" fill="{color}" />
+  <circle cx="44" cy="20" r="2.2" fill="#DDD6FE" />
+  <circle cx="44" cy="44" r="2.2" fill="#DDD6FE" />
+
+  <!-- Central AI Quantum Diamond Core -->
+  <polygon points="32,23 41,32 32,41 23,32"
+           fill="url(#cyberaCoreGrad)"
+           stroke="#FFFFFF"
+           stroke-width="1.8"
+           stroke-linejoin="round" />
+
+  <!-- Central Intelligence Pulse Core -->
+  <circle cx="32" cy="32" r="3.2" fill="#FFFFFF" />
+  <circle cx="32" cy="32" r="1.6" fill="{color}" />
+</svg>"""
+
+
 def icon(name: str, color: str = "#94A3B8", size: int = 20) -> QIcon:
     """Render a crisp Qt icon without an external icon-font dependency."""
-    if name not in PATHS:
-        raise KeyError(f"Unknown icon: {name}")
-    svg = (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" '
-        f'viewBox="0 0 24 24" fill="none" stroke="{color}" '
-        f'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
-        f'{PATHS[name]}</svg>'
-    )
+    if name == "logo":
+        svg = _build_cybera_logo_svg(color)
+    else:
+        if name not in PATHS:
+            raise KeyError(f"Unknown icon: {name}")
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" '
+            f'viewBox="0 0 24 24" fill="none" stroke="{color}" '
+            f'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+            f'{PATHS[name]}</svg>'
+        )
     renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
     pixmap = QPixmap(size * 2, size * 2)
     pixmap.fill(Qt.GlobalColor.transparent)

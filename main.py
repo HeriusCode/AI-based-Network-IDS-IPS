@@ -9,6 +9,7 @@ from app.core.config import APP_NAME
 from app.core.theme import load_stylesheet
 from app.services.auth_service import ensure_default_admin
 from app.services.database import init_db
+from app.ui.icons import icon
 from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow
 from app.ui.register_window import RegisterWindow
@@ -26,6 +27,7 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setWindowIcon(icon("logo", "#8B5CF6", 64))
     app.setStyle("Fusion")
     app.setStyleSheet(load_stylesheet())
     login = LoginWindow()
@@ -76,8 +78,19 @@ def main() -> int:
 
     def open_workspace(display_name: str = "admin", role: str = "Quản trị viên") -> None:
         window = MainWindow()
-        window.sidebar.account_text.setText(f"{display_name}\n<span>{role}</span>")
+        window.sidebar.set_user_info(display_name, role)
         windows["main"] = window
+
+        def handle_logout() -> None:
+            login.password.clear()
+            login.status.setText("")
+            window.close()
+            windows["main"] = None
+            login.show()
+            login.raise_()
+            login.activateWindow()
+
+        window.logout_requested.connect(handle_logout)
         window.show()
         login.hide()
         register.hide()

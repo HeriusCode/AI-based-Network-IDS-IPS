@@ -6,7 +6,7 @@ import random
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QCursor,
@@ -74,6 +74,18 @@ class BrandPanel(QWidget):
         self._compact = False
         asset = Path(__file__).resolve().parents[1] / "assets" / "images" / "digital_earth.png"
         self.earth = QPixmap(str(asset))
+        self._angle = 0.0
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(30)
+        self._timer.timeout.connect(self._rotate_earth)
+        self._timer.start()
+
+    def _rotate_earth(self) -> None:
+        if not self.isVisible():
+            return
+        self._angle = (self._angle + 0.22) % 360.0
+        self.update()
 
     def resizeEvent(self, event) -> None:
         compact = self.height() < 720
@@ -91,16 +103,20 @@ class BrandPanel(QWidget):
         if self.earth.isNull():
             return
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
         diameter = self.width() * 1.30
-        globe = QRectF(
-            (self.width() - diameter) / 2,
-            self.height() - diameter * 0.30,
-            diameter,
-            diameter,
-        )
-        painter.setOpacity(0.18)
-        painter.drawPixmap(globe.toRect(), self.earth)
+        center_x = self.width() / 2.0
+        center_y = self.height() - diameter * 0.30 + diameter / 2.0
+
+        painter.save()
+        painter.translate(center_x, center_y)
+        painter.rotate(self._angle)
+        painter.setOpacity(0.24)
+        target = QRectF(-diameter / 2.0, -diameter / 2.0, diameter, diameter)
+        painter.drawPixmap(target.toRect(), self.earth)
+        painter.restore()
         painter.end()
 
     def sizeHint(self) -> QSize:
@@ -120,11 +136,11 @@ class AuthTitleBar(QFrame):
         row.setContentsMargins(26, 0, 12, 0)
         row.setSpacing(10)
         logo = QLabel()
-        logo.setPixmap(icon("logo", "#38A9FF", 37).pixmap(37, 37))
+        logo.setPixmap(icon("logo", "#8B5CF6", 37).pixmap(37, 37))
         logo.setFixedSize(40, 40)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(logo)
-        name = QLabel("AI Network IDS/IPS")
+        name = QLabel("CYBERA")
         name.setObjectName("authBrandName")
         row.addWidget(name)
         row.addStretch()
@@ -135,7 +151,7 @@ class AuthTitleBar(QFrame):
         ]:
             button = QPushButton()
             button.setObjectName(object_name)
-            button.setIcon(icon(icon_name, "#B8CCE5", 15))
+            button.setIcon(icon(icon_name, "#8E8BA7", 15))
             button.setIconSize(QSize(15, 15))
             button.setToolTip(tooltip)
             button.clicked.connect(signal)
@@ -144,7 +160,7 @@ class AuthTitleBar(QFrame):
                 self.maximize_button = button
 
     def set_maximized(self, maximized: bool) -> None:
-        self.maximize_button.setIcon(icon("restore" if maximized else "maximize", "#B8CCE5", 15))
+        self.maximize_button.setIcon(icon("restore" if maximized else "maximize", "#8E8BA7", 15))
         self.maximize_button.setToolTip("Khôi phục" if maximized else "Phóng to")
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
@@ -302,17 +318,17 @@ class RegisterWindow(AuthWindowMixin, QMainWindow):
         layout.setSpacing(12)
         logo = QLabel()
         panel.logo_label = logo
-        logo.setPixmap(icon("logo", "#159BFF", 130).pixmap(130, 130))
+        logo.setPixmap(icon("logo", "#8B5CF6", 130).pixmap(130, 130))
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo.setFixedHeight(130)
         layout.addWidget(logo)
         layout.addSpacing(24)
-        title = QLabel("AI Network IDS/IPS")
+        title = QLabel("CYBERA")
         title.setObjectName("registerProductTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setFixedHeight(40)
         layout.addWidget(title)
-        subtitle = QLabel("Giám sát - Phát hiện - Dự đoán - Giảm thiểu rủi ro")
+        subtitle = QLabel("Cybersecurity AI System  •  Hệ thống AI giám sát và phòng vệ an ninh mạng")
         subtitle.setObjectName("registerProductSubtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setFixedHeight(24)
@@ -330,7 +346,7 @@ class RegisterWindow(AuthWindowMixin, QMainWindow):
             item = QVBoxLayout()
             badge = QLabel()
             badge.setObjectName("registerFeatureIcon")
-            badge.setPixmap(icon(icon_name, "#36AAFF", 28).pixmap(28, 28))
+            badge.setPixmap(icon(icon_name, "#A78BFA", 28).pixmap(28, 28))
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.setFixedSize(62, 62)
             item.addWidget(badge, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -360,7 +376,7 @@ class RegisterWindow(AuthWindowMixin, QMainWindow):
         heading_row = QHBoxLayout()
         heading_row.setSpacing(20)
         heading_icon = QLabel()
-        heading_icon.setPixmap(icon("user_add", "#3BA9FF", 55).pixmap(55, 55))
+        heading_icon.setPixmap(icon("user_add", "#8B5CF6", 55).pixmap(55, 55))
         heading_icon.setFixedSize(66, 66)
         heading_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         heading_row.addWidget(heading_icon, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -437,7 +453,7 @@ class RegisterWindow(AuthWindowMixin, QMainWindow):
         row.setContentsMargins(2, 0, 0, 0)
         row.setSpacing(9)
         badge = QLabel()
-        badge.setPixmap(icon(icon_name, "#71AFFF", 19).pixmap(19, 19))
+        badge.setPixmap(icon(icon_name, "#A78BFA", 19).pixmap(19, 19))
         badge.setFixedSize(22, 22)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(badge)

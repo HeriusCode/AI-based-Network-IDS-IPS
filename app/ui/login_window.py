@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -37,22 +37,38 @@ class LoginBrandPanel(QWidget):
         self.setMinimumWidth(480)
         self.hero = QPixmap(str(ASSET_DIR / "security_login_hero.png"))
         self.earth = QPixmap(str(ASSET_DIR / "digital_earth.png"))
+        self._angle = 0.0
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(30)
+        self._timer.timeout.connect(self._rotate_earth)
+        self._timer.start()
+
+    def _rotate_earth(self) -> None:
+        if not self.isVisible():
+            return
+        self._angle = (self._angle + 0.22) % 360.0
+        self.update()
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
         if self.earth.isNull():
             return
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
         diameter = self.width() * 1.30
-        globe = QRectF(
-            (self.width() - diameter) / 2,
-            self.height() - diameter * 0.30,
-            diameter,
-            diameter,
-        )
-        painter.setOpacity(0.18)
-        painter.drawPixmap(globe.toRect(), self.earth)
+        center_x = self.width() / 2.0
+        center_y = self.height() - diameter * 0.30 + diameter / 2.0
+
+        painter.save()
+        painter.translate(center_x, center_y)
+        painter.rotate(self._angle)
+        painter.setOpacity(0.24)
+        target = QRectF(-diameter / 2.0, -diameter / 2.0, diameter, diameter)
+        painter.drawPixmap(target.toRect(), self.earth)
+        painter.restore()
 
 
 class LoginWindow(AuthWindowMixin, QMainWindow):
@@ -102,15 +118,15 @@ class LoginWindow(AuthWindowMixin, QMainWindow):
         brand_row = QHBoxLayout()
         brand_row.setSpacing(18)
         logo = QLabel()
-        logo.setPixmap(icon("logo", "#169DFF", 82).pixmap(82, 82))
+        logo.setPixmap(icon("logo", "#8B5CF6", 82).pixmap(82, 82))
         logo.setFixedSize(86, 86)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         brand_row.addWidget(logo)
         copy = QVBoxLayout()
         copy.setSpacing(2)
-        title = QLabel("AI Network IDS/IPS")
+        title = QLabel("CYBERA")
         title.setObjectName("loginProductTitle")
-        subtitle = QLabel("Giám sát - Phát hiện - Dự đoán - Giảm thiểu rủi ro")
+        subtitle = QLabel("Cybersecurity AI System  •  Hệ thống AI giám sát và phòng vệ an ninh mạng")
         subtitle.setObjectName("loginProductSubtitle")
         subtitle.setWordWrap(True)
         copy.addWidget(title)
@@ -136,7 +152,7 @@ class LoginWindow(AuthWindowMixin, QMainWindow):
             column = QVBoxLayout()
             badge = QLabel()
             badge.setObjectName("loginFeatureIcon")
-            badge.setPixmap(icon(icon_name, "#89B9FF", 29).pixmap(29, 29))
+            badge.setPixmap(icon(icon_name, "#A78BFA", 29).pixmap(29, 29))
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.setFixedSize(64, 64)
             column.addWidget(badge, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -166,7 +182,7 @@ class LoginWindow(AuthWindowMixin, QMainWindow):
         heading_row = QHBoxLayout()
         heading_row.setSpacing(20)
         logo = QLabel()
-        logo.setPixmap(icon("logo", "#159BFF", 70).pixmap(70, 70))
+        logo.setPixmap(icon("logo", "#8B5CF6", 70).pixmap(70, 70))
         logo.setFixedSize(74, 74)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         heading_row.addWidget(logo)
@@ -256,7 +272,7 @@ class LoginWindow(AuthWindowMixin, QMainWindow):
         row.setContentsMargins(2, 0, 0, 0)
         row.setSpacing(11)
         badge = QLabel()
-        badge.setPixmap(icon(icon_name, "#85B7FF", 22).pixmap(22, 22))
+        badge.setPixmap(icon(icon_name, "#A78BFA", 22).pixmap(22, 22))
         badge.setFixedSize(24, 24)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(badge)

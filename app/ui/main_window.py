@@ -1,11 +1,12 @@
 """Application shell, frameless controls and resize behavior."""
 
-from PySide6.QtCore import QEvent, QRect, Qt
+from PySide6.QtCore import QEvent, QRect, Qt, Signal
 from PySide6.QtGui import QCursor, QMouseEvent
-from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
 
 from app.core.config import WINDOW_TITLE
 from app.core.navigation import NAV_ITEMS
+from app.ui.dialogs import LogoutConfirmDialog
 from app.ui.pages.dashboard import DashboardPage
 from app.ui.pages.alerts import AlertsPage
 from app.ui.pages.detection import DetectionPage
@@ -40,6 +41,7 @@ class ResizeHandle(QWidget):
 
 
 class MainWindow(QMainWindow):
+    logout_requested = Signal()
     GRIP = 7
     CORNER = 14
 
@@ -59,6 +61,7 @@ class MainWindow(QMainWindow):
 
         self.sidebar = Sidebar()
         self.sidebar.page_selected.connect(self.navigate)
+        self.sidebar.logout_requested.connect(self.confirm_logout)
         shell.addWidget(self.sidebar)
 
         right = QWidget()
@@ -159,6 +162,13 @@ class MainWindow(QMainWindow):
 
     def show_notifications(self) -> None:
         QMessageBox.information(self, "Thông báo", "Bạn có 3 cảnh báo an ninh mới trong dữ liệu mô phỏng.")
+
+    def confirm_logout(self) -> None:
+        username = self.sidebar.account_name.text() if hasattr(self.sidebar, "account_name") else "admin"
+        role = self.sidebar.account_role.text() if hasattr(self.sidebar, "account_role") else "Quản trị viên"
+        dialog = LogoutConfirmDialog(username=username, role=role, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.logout_requested.emit()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

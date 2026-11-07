@@ -1,7 +1,16 @@
-"""Compact frameless-window top bar for the IDS/IPS dashboard."""
+"""Compact, responsive frameless-window top bar for the IDS/IPS SOC dashboard."""
+
+from __future__ import annotations
 
 from PySide6.QtCore import QDateTime, QSize, Qt, QTimer, QTimeZone, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.ui.icons import icon
 
@@ -16,100 +25,126 @@ class Topbar(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("topbar")
-        self.setFixedHeight(72)
+        self.setFixedHeight(56)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(78, 0, 8, 0)
-        layout.setSpacing(9)
+        layout.setContentsMargins(18, 0, 10, 0)
+        layout.setSpacing(10)
 
-        self.search = QLineEdit()
-        self.search.setObjectName("globalSearch")
-        self.search.setPlaceholderText("Tìm kiếm...")
-        self.search.addAction(icon("search", "#8299B7"), QLineEdit.ActionPosition.LeadingPosition)
-        self.search.setFixedWidth(380)
-        self.search.setClearButtonEnabled(True)
-        layout.addWidget(self.search)
-        layout.addStretch(1)
+        # 1. Left Section: System Status Badges
+        status_group = QWidget()
+        status_layout = QHBoxLayout(status_group)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(8)
 
-        self.demo_status = QLabel("●  Hệ thống: <b>Đang hoạt động</b>")
+        self.demo_status = QLabel("●  Hệ thống: Hoạt động")
         self.demo_status.setObjectName("liveStatus")
         self.demo_status.setFixedHeight(28)
-        self.demo_status.setMaximumWidth(158)
-        layout.addWidget(self.demo_status, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.demo_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_layout.addWidget(self.demo_status)
 
-        self.backend_status = QLabel("☁  Kết nối: <b>Online</b>")
+        self.backend_status = QLabel("☁  Backend: Online")
         self.backend_status.setObjectName("onlineStatus")
         self.backend_status.setFixedHeight(28)
-        self.backend_status.setMaximumWidth(116)
-        self.backend_status.setToolTip("Trạng thái mô phỏng; chưa có kết nối backend thực tế.")
-        layout.addWidget(self.backend_status, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.backend_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.backend_status.setToolTip("Trạng thái mô phỏng; sẵn sàng kết nối dữ liệu.")
+        status_layout.addWidget(self.backend_status)
 
-        separator = QFrame()
-        separator.setObjectName("topbarSeparator")
-        separator.setFixedSize(1, 28)
-        layout.addWidget(separator)
+        layout.addWidget(status_group, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # 2. Flexible Spacer (Wide drag area for moving the frameless window)
+        layout.addStretch(1)
+
+        # 3. Live Clock Card
+        clock_card = QFrame()
+        clock_card.setObjectName("topbarClockCard")
+        clock_card.setFixedHeight(34)
+        clock_layout = QHBoxLayout(clock_card)
+        clock_layout.setContentsMargins(10, 2, 10, 2)
+        clock_layout.setSpacing(8)
 
         clock_icon = QLabel()
-        clock_icon.setPixmap(icon("clock", "#9FB8D8", 18).pixmap(18, 18))
-        clock_icon.setFixedSize(22, 28)
+        clock_icon.setPixmap(icon("clock", "#8B5CF6", 16).pixmap(16, 16))
+        clock_icon.setFixedSize(16, 16)
         clock_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(clock_icon)
+        clock_layout.addWidget(clock_icon)
 
-        clock_group = QWidget()
-        clock_group.setFixedSize(104, 30)
-        clock_box = QVBoxLayout(clock_group)
+        clock_box = QVBoxLayout()
         clock_box.setContentsMargins(0, 0, 0, 0)
         clock_box.setSpacing(0)
+
         self.clock = QLabel()
         self.clock.setObjectName("topbarClock")
-        self.clock.setFixedHeight(17)
+        self.clock.setFixedHeight(16)
+
         self.date = QLabel()
         self.date.setObjectName("topbarDate")
-        self.date.setFixedHeight(13)
+        self.date.setFixedHeight(12)
+
         clock_box.addWidget(self.clock)
         clock_box.addWidget(self.date)
-        layout.addWidget(clock_group, 0, Qt.AlignmentFlag.AlignVCenter)
+        clock_layout.addLayout(clock_box)
+
+        layout.addWidget(clock_card, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._update_clock)
         self._timer.start(1000)
         self._update_clock()
 
-        separator2 = QFrame()
-        separator2.setObjectName("topbarSeparator")
-        separator2.setFixedSize(1, 28)
-        layout.addWidget(separator2)
+        # 4. Separator 1
+        sep1 = QFrame()
+        sep1.setObjectName("topbarSeparator")
+        sep1.setFixedSize(1, 24)
+        layout.addWidget(sep1, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # 5. Quick Action Buttons
+        actions_group = QWidget()
+        actions_layout = QHBoxLayout(actions_group)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(6)
 
         self.notification_button = self._icon_button("bell", "Thông báo")
         self.notification_button.clicked.connect(self.notifications_requested)
-        layout.addWidget(self.notification_button)
-        self.settings_button = self._icon_button("settings", "Mở cài đặt")
-        self.settings_button.clicked.connect(self.settings_requested)
-        layout.addWidget(self.settings_button)
+        actions_layout.addWidget(self.notification_button)
 
-        separator3 = QFrame()
-        separator3.setObjectName("topbarSeparator")
-        separator3.setFixedSize(1, 28)
-        layout.addWidget(separator3)
+        self.settings_button = self._icon_button("settings", "Cài đặt hệ thống")
+        self.settings_button.clicked.connect(self.settings_requested)
+        actions_layout.addWidget(self.settings_button)
+
+        layout.addWidget(actions_group, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # 6. Separator 2
+        sep2 = QFrame()
+        sep2.setObjectName("topbarSeparator")
+        sep2.setFixedSize(1, 24)
+        layout.addWidget(sep2, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # 7. Window Controls
+        win_group = QWidget()
+        win_layout = QHBoxLayout(win_group)
+        win_layout.setContentsMargins(0, 0, 0, 0)
+        win_layout.setSpacing(4)
 
         self.minimize_button = self._window_button("minimize", "Thu nhỏ")
         self.minimize_button.clicked.connect(self.minimize_requested)
-        layout.addWidget(self.minimize_button)
+        win_layout.addWidget(self.minimize_button)
+
         self.maximize_button = self._window_button("maximize", "Phóng to")
         self.maximize_button.clicked.connect(self.maximize_requested)
-        layout.addWidget(self.maximize_button)
+        win_layout.addWidget(self.maximize_button)
+
         self.close_button = self._window_button("close", "Đóng", close=True)
         self.close_button.clicked.connect(self.close_requested)
-        layout.addWidget(self.close_button)
+        win_layout.addWidget(self.close_button)
 
-        self.title = QLabel("Dashboard")
-        self.title.hide()
+        layout.addWidget(win_group, 0, Qt.AlignmentFlag.AlignVCenter)
 
     @staticmethod
     def _icon_button(name: str, tooltip: str) -> QPushButton:
         button = QPushButton()
         button.setObjectName("topIconButton")
-        button.setIcon(icon(name, "#AFC5E2"))
-        button.setIconSize(QSize(20, 20))
+        button.setIcon(icon(name, "#8E8BA7"))
+        button.setIconSize(QSize(18, 18))
         button.setToolTip(tooltip)
         return button
 
@@ -117,17 +152,17 @@ class Topbar(QFrame):
     def _window_button(name: str, tooltip: str, close: bool = False) -> QPushButton:
         button = QPushButton()
         button.setObjectName("closeWindowButton" if close else "windowButton")
-        button.setIcon(icon(name, "#AFC5E2", 15))
+        button.setIcon(icon(name, "#8E8BA7", 15))
         button.setIconSize(QSize(15, 15))
         button.setToolTip(tooltip)
         return button
 
     def set_maximized(self, maximized: bool) -> None:
         if maximized:
-            self.maximize_button.setIcon(icon("restore", "#AFC5E2", 15))
+            self.maximize_button.setIcon(icon("restore", "#8E8BA7", 15))
             self.maximize_button.setToolTip("Khôi phục")
         else:
-            self.maximize_button.setIcon(icon("maximize", "#AFC5E2", 15))
+            self.maximize_button.setIcon(icon("maximize", "#8E8BA7", 15))
             self.maximize_button.setToolTip("Phóng to")
 
     def mouseDoubleClickEvent(self, event) -> None:
@@ -145,12 +180,12 @@ class Topbar(QFrame):
         super().mousePressEvent(event)
 
     def set_page_title(self, title: str) -> None:
-        self.title.setText(title)
+        """Page title is already rendered within each page content."""
+        pass
 
     def set_compact(self, compact: bool) -> None:
-        self.search.setFixedWidth(250 if compact else 380)
         self.backend_status.setVisible(not compact)
-        self.demo_status.setVisible(not compact)
+        self.demo_status.setText("● Hoạt động" if compact else "●  Hệ thống: Hoạt động")
 
     def _update_clock(self) -> None:
         now = QDateTime.currentDateTimeUtc().toTimeZone(QTimeZone(b"Asia/Bangkok"))

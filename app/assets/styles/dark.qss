@@ -2206,13 +2206,12 @@ QCheckBox#loginRemember::indicator {
     height: 18px;
     border: 1px solid #38326D;
     border-radius: 5px;
-    background: #15132B;
+    background: transparent;
 }
 
 QCheckBox#loginRemember::indicator:checked {
-    background: #6C5DD3;
-    border-color: #7B61FF;
-    image: url(none);
+    background: transparent;
+    border-color: transparent;
 }
 
 QPushButton#loginForgot {

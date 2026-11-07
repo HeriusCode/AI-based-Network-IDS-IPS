@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QFrame,
     QHBoxLayout,
@@ -15,6 +16,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSizePolicy,
+    QStyle,
+    QStyleOptionButton,
     QVBoxLayout,
     QWidget,
 )
@@ -26,6 +29,64 @@ from app.ui.register_window import AuthTitleBar, AuthWindowMixin, NetworkBackgro
 
 
 ASSET_DIR = Path(__file__).resolve().parents[1] / "assets" / "images"
+
+
+class RememberCheckBox(QCheckBox):
+    """Styled checkbox that draws a purple tick without a filled background."""
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self.isChecked():
+            return
+
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        indicator = self.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator, option, self)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor("#8B5CF6"), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawLine(
+            indicator.left() + 4,
+            indicator.center().y(),
+            indicator.left() + 8,
+            indicator.bottom() - 4,
+        )
+        painter.drawLine(
+            indicator.left() + 8,
+            indicator.bottom() - 4,
+            indicator.right() - 3,
+            indicator.top() + 4,
+        )
+
+
+class ResponsivePixmapLabel(QLabel):
+    """Keep a source pixmap fitted to the label from the very first layout pass."""
+
+    def __init__(self, pixmap: QPixmap, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._source_pixmap = pixmap
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def _fit_pixmap(self) -> None:
+        if self._source_pixmap.isNull() or self.width() <= 1 or self.height() <= 1:
+            return
+        self.setPixmap(
+            self._source_pixmap.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._fit_pixmap()
+        QTimer.singleShot(0, self._fit_pixmap)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit_pixmap()
 
 
 class LoginBrandPanel(QWidget):
@@ -81,6 +142,7 @@ class LoginWindow(AuthWindowMixin, QMainWindow):
         self.setWindowTitle("Đăng nhập | " + WINDOW_TITLE)
         self.resize(1536, 960)
         self.setMinimumSize(1040, 720)
+        self._centered_on_screen = False
 
         root = NetworkBackground()
         root.setObjectName("loginRoot")
@@ -122,22 +184,25 @@ class LoginWindow(AuthWindowMixin, QMainWindow):
         logo.setFixedSize(86, 86)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         brand_row.addWidget(logo)
-        copy = QVBoxLayout()
-        copy.setSpacing(2)
+        copy_widget = QWidget()
+        copy = QVBoxLayout(copy_widget)
+        copy.setContentsMargins(0, 0, 0, 0)
+        copy.setSpacing(3)
+        copy.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         title = QLabel("CYBERA")
         title.setObjectName("loginProductTitle")
+        title.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         subtitle = QLabel("Cybersecurity AI System  •  Hệ thống AI giám sát và phòng vệ an ninh mạng")
         subtitle.setObjectName("loginProductSubtitle")
         subtitle.setWordWrap(True)
+        subtitle.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         copy.addWidget(title)
         copy.addWidget(subtitle)
-        brand_row.addLayout(copy, 1)
+        brand_row.addWidget(copy_widget, 1, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(brand_row)
 
-        hero = QLabel()
+        hero = ResponsivePixmapLabel(panel.hero)
         panel.hero_label = hero
-        hero.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         hero.setMinimumHeight(250)
         layout.addWidget(hero, 4)
 
@@ -186,17 +251,23 @@ class LoginWindow(AuthWindowMixin, QMainWindow):
         logo.setFixedSize(74, 74)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         heading_row.addWidget(logo)
-        heading_copy = QVBoxLayout()
+        heading_copy_widget = QWidget()
+        heading_copy = QVBoxLayout(heading_copy_widget)
+        heading_copy.setContentsMargins(0, 0, 0, 0)
+        heading_copy.setSpacing(2)
+        heading_copy.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         heading = QLabel("Đăng nhập")
         heading.setObjectName("loginHeading")
+        heading.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         subheading = QLabel("Chào mừng trở lại! Vui lòng đăng nhập để tiếp tục.")
         subheading.setObjectName("loginSubheading")
         subheading.setWordWrap(True)
-        heading_copy.addWidget(heading)
-        heading_copy.addWidget(subheading)
-        heading_row.addLayout(heading_copy, 1)
+        subheading.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        heading_copy.addWidget(heading, 0, Qt.AlignmentFlag.AlignBottom)
+        heading_copy.addWidget(subheading, 0, Qt.AlignmentFlag.AlignTop)
+        heading_row.addWidget(heading_copy_widget, 1, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(heading_row)
-        layout.addSpacing(20)
+        layout.addSpacing(14)
 
         layout.addWidget(self._field_label("Tài khoản", "user"))
         self.account = QLineEdit()
@@ -217,7 +288,7 @@ class LoginWindow(AuthWindowMixin, QMainWindow):
         layout.addWidget(self.password)
 
         options = QHBoxLayout()
-        self.remember = QCheckBox("Ghi nhớ đăng nhập")
+        self.remember = RememberCheckBox("Ghi nhớ đăng nhập")
         self.remember.setObjectName("loginRemember")
         self.remember.setChecked(True)
         options.addWidget(self.remember)
@@ -331,9 +402,17 @@ class LoginWindow(AuthWindowMixin, QMainWindow):
         if hasattr(self, "_resize_handles"):
             self._position_resize_handles()
 
-        panel = self.findChild(LoginBrandPanel)
-        if panel and not panel.hero.isNull():
-            target = panel.hero_label.size()
-            panel.hero_label.setPixmap(
-                panel.hero.scaled(target, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            )
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._centered_on_screen and not self.isMaximized():
+            self._centered_on_screen = True
+            QTimer.singleShot(0, self._center_window)
+
+    def _center_window(self) -> None:
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None or self.isMaximized():
+            return
+        available = screen.availableGeometry()
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        self.move(frame.topLeft())

@@ -79,27 +79,27 @@ class MainWindow(QMainWindow):
 
         self.pages = QStackedWidget()
         self._page_index: dict[str, int] = {}
+        self._loaded_pages: dict[str, QWidget] = {}
+        self._page_factories = {
+            "dashboard": DashboardPage,
+            "monitoring": MonitoringPage,
+            "detection": DetectionPage,
+            "prediction": PredictionPage,
+            "mitigation": MitigationPage,
+            "topology": TopologyPage,
+            "alerts": AlertsPage,
+            "reports": ReportsPage,
+            "settings": SettingsPage,
+        }
         for item in NAV_ITEMS:
             if item.key == "dashboard":
                 page = DashboardPage()
-            elif item.key == "monitoring":
-                page = MonitoringPage()
-            elif item.key == "detection":
-                page = DetectionPage()
-            elif item.key == "prediction":
-                page = PredictionPage()
-            elif item.key == "mitigation":
-                page = MitigationPage()
-            elif item.key == "topology":
-                page = TopologyPage()
-            elif item.key == "alerts":
-                page = AlertsPage()
-            elif item.key == "reports":
-                page = ReportsPage()
-            elif item.key == "settings":
-                page = SettingsPage()
+                self._loaded_pages[item.key] = page
+            elif item.key in self._page_factories:
+                page = QWidget()
             else:
                 page = PlaceholderPage(item)
+                self._loaded_pages[item.key] = page
             self._page_index[item.key] = self.pages.addWidget(page)
         right_layout.addWidget(self.pages, 1)
         shell.addWidget(right, 1)
@@ -142,7 +142,15 @@ class MainWindow(QMainWindow):
     def navigate(self, key: str) -> None:
         if key not in self._page_index:
             return
-        self.pages.setCurrentIndex(self._page_index[key])
+        index = self._page_index[key]
+        if key not in self._loaded_pages:
+            placeholder = self.pages.widget(index)
+            page = self._page_factories[key]()
+            self.pages.insertWidget(index, page)
+            self.pages.removeWidget(placeholder)
+            placeholder.deleteLater()
+            self._loaded_pages[key] = page
+        self.pages.setCurrentIndex(index)
         self.sidebar.select(key)
         self.topbar.set_page_title(next(item.title for item in NAV_ITEMS if item.key == key))
 

@@ -8,7 +8,7 @@ import secrets
 from typing import Optional
 
 from app.models.user import User
-from app.services.database import get_connection
+from app.services.database import get_connection, release_connection
 
 
 def hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
@@ -53,19 +53,18 @@ def register_user(
 
     pwd_hash, salt = hash_password(password)
 
+    conn = None
     try:
         conn = get_connection()
         with conn.cursor() as cur:
             # Check for existing username
             cur.execute("SELECT id FROM users WHERE LOWER(username) = LOWER(%s);", (username,))
             if cur.fetchone() is not None:
-                conn.close()
                 return False, f"Tên đăng nhập '{username}' đã được sử dụng.", None
 
             # Check for existing email
             cur.execute("SELECT id FROM users WHERE LOWER(email) = LOWER(%s);", (email,))
             if cur.fetchone() is not None:
-                conn.close()
                 return False, f"Email '{email}' đã được đăng ký tài khoản.", None
 
             # Insert new user
@@ -80,7 +79,6 @@ def register_user(
             user_id, created_at = cur.fetchone()
             conn.commit()
 
-        conn.close()
         new_user = User(
             id=user_id,
             username=username,
@@ -92,6 +90,8 @@ def register_user(
         return True, "Đăng ký tài khoản thành công!", new_user
     except Exception as error:
         return False, f"Lỗi cơ sở dữ liệu khi đăng ký: {error}", None
+    finally:
+        release_connection(conn)
 
 
 def authenticate_user(account: str, password: str) -> tuple[bool, str, Optional[User]]:
@@ -102,6 +102,7 @@ def authenticate_user(account: str, password: str) -> tuple[bool, str, Optional[
     if not password:
         return False, "Vui lòng nhập mật khẩu.", None
 
+    conn = None
     try:
         conn = get_connection()
         with conn.cursor() as cur:
@@ -115,20 +116,17 @@ def authenticate_user(account: str, password: str) -> tuple[bool, str, Optional[
             )
             row = cur.fetchone()
             if not row:
-                conn.close()
                 return False, "Tài khoản hoặc email không tồn tại trong hệ thống.", None
 
             user_id, username, email, full_name, stored_hash, salt, role, created_at, last_login = row
 
             if not verify_password(password, stored_hash, salt):
-                conn.close()
                 return False, "Mật khẩu không chính xác. Vui lòng thử lại.", None
 
             # Update last_login
             cur.execute("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = %s;", (user_id,))
             conn.commit()
 
-        conn.close()
         user = User(
             id=user_id,
             username=username,
@@ -141,10 +139,13 @@ def authenticate_user(account: str, password: str) -> tuple[bool, str, Optional[
         return True, "Đăng nhập thành công!", user
     except Exception as error:
         return False, f"Lỗi cơ sở dữ liệu khi đăng nhập: {error}", None
+    finally:
+        release_connection(conn)
 
 
 def ensure_default_admin() -> tuple[bool, str]:
     """Create a default administrator account if the users table is completely empty."""
+    conn = None
     try:
         conn = get_connection()
         with conn.cursor() as cur:
@@ -160,10 +161,10 @@ def ensure_default_admin() -> tuple[bool, str]:
                     ("admin", "admin@soc.local", "Quản trị viên hệ thống", pwd_hash, salt, "Quản trị viên"),
                 )
                 conn.commit()
-                conn.close()
                 return True, "Đã tạo tài khoản mặc định: admin / Admin@123"
-        conn.close()
         return True, "Tài khoản người dùng đã tồn tại."
     except Exception as error:
         return False, f"Không thể tạo tài khoản mặc định: {error}"
+    finally:
+        release_connection(conn)
 

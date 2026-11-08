@@ -2,17 +2,15 @@
 
 import sys
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation
 from PySide6.QtWidgets import QApplication
 
 from app.core.config import APP_NAME
 from app.core.theme import load_stylesheet
 from app.services.auth_service import ensure_default_admin
 from app.services.database import init_db
+from app.ui.auth_window import AuthWindow
 from app.ui.icons import icon
-from app.ui.login_window import LoginWindow
 from app.ui.main_window import MainWindow
-from app.ui.register_window import RegisterWindow
 
 
 def main() -> int:
@@ -30,51 +28,9 @@ def main() -> int:
     app.setWindowIcon(icon("logo", "#8B5CF6", 64))
     app.setStyle("Fusion")
     app.setStyleSheet(load_stylesheet())
-    login = LoginWindow()
-    register = RegisterWindow()
-    windows = {"login": login, "register": register, "main": None}
-    animations: dict[str, QPropertyAnimation] = {}
 
-    def switch_auth(source, target) -> None:
-        running = animations.pop("auth", None)
-        if running is not None:
-            running.stop()
-        login.setWindowOpacity(1.0)
-        register.setWindowOpacity(1.0)
-        target.setWindowOpacity(0.0)
-
-        if source.isMaximized():
-            target.setGeometry(source.normalGeometry())
-            target.showMaximized()
-        else:
-            target.showNormal()
-            target.setGeometry(source.geometry())
-
-        target.raise_()
-        target.activateWindow()
-
-        animation = QPropertyAnimation(target, b"windowOpacity", app)
-        animation.setDuration(180)
-        animation.setStartValue(0.0)
-        animation.setEndValue(1.0)
-        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        animations["auth"] = animation
-
-        def finish_transition() -> None:
-            source.hide()
-            source.setWindowOpacity(1.0)
-            target.setWindowOpacity(1.0)
-            if animations.get("auth") is animation:
-                animations.pop("auth", None)
-
-        animation.finished.connect(finish_transition)
-        animation.start()
-
-    def open_register() -> None:
-        switch_auth(login, register)
-
-    def open_login() -> None:
-        switch_auth(register, login)
+    auth = AuthWindow()
+    windows = {"auth": auth, "login": auth, "main": None}
 
     def open_workspace(display_name: str = "admin", role: str = "Quản trị viên") -> None:
         window = MainWindow()
@@ -82,24 +38,20 @@ def main() -> int:
         windows["main"] = window
 
         def handle_logout() -> None:
-            login.password.clear()
-            login.status.setText("")
+            auth.reset_state()
             window.close()
             windows["main"] = None
-            login.show()
-            login.raise_()
-            login.activateWindow()
+            auth.show()
+            auth.raise_()
+            auth.activateWindow()
 
         window.logout_requested.connect(handle_logout)
         window.show()
-        login.hide()
-        register.hide()
+        auth.hide()
 
-    login.authenticated.connect(open_workspace)
-    login.register_requested.connect(open_register)
-    register.registration_completed.connect(open_workspace)
-    register.back_requested.connect(open_login)
-    login.show()
+    auth.authenticated.connect(open_workspace)
+    auth.registration_completed.connect(open_workspace)
+    auth.show()
     return app.exec()
 
 

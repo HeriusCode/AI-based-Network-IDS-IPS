@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 CONFIG_FILE = Path(__file__).resolve().parents[2] / "db_config.json"
@@ -16,6 +17,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "user": "postgres",
     "password": "your_password",
 }
+
+_CONNECTION_POOL = None
+_CONNECTION_POOL_KEY: tuple[Any, ...] | None = None
+_CONNECTION_POOL_LOCK = Lock()
 
 
 def get_db_config() -> dict[str, Any]:
@@ -60,9 +65,11 @@ def save_db_config(new_config: dict[str, Any]) -> bool:
 
 
 def get_connection():
-    """Establish and return a connection to PostgreSQL."""
+    """Borrow a PostgreSQL connection from a small thread-safe pool."""
+    global _CONNECTION_POOL, _CONNECTION_POOL_KEY
+
     try:
-        import psycopg2
+        from psycopg2.pool import ThreadedConnectionPool
     except ImportError as error:
         raise RuntimeError(
             "Chưa cài đặt thư viện psycopg2. Vui lòng chạy lệnh:\n"
@@ -70,14 +77,49 @@ def get_connection():
         ) from error
 
     config = get_db_config()
-    return psycopg2.connect(
-        host=config["host"],
-        port=config["port"],
-        dbname=config["database"],
-        user=config["user"],
-        password=config["password"],
-        connect_timeout=5,
+    pool_key = (
+        config["host"],
+        config["port"],
+        config["database"],
+        config["user"],
+        config["password"],
+        config.get("sslmode"),
     )
+    with _CONNECTION_POOL_LOCK:
+        if _CONNECTION_POOL is None or _CONNECTION_POOL_KEY != pool_key:
+            if _CONNECTION_POOL is not None:
+                _CONNECTION_POOL.closeall()
+            connection_options = {
+                "host": config["host"],
+                "port": config["port"],
+                "dbname": config["database"],
+                "user": config["user"],
+                "password": config["password"],
+                "connect_timeout": 5,
+            }
+            if config.get("sslmode"):
+                connection_options["sslmode"] = config["sslmode"]
+            _CONNECTION_POOL = ThreadedConnectionPool(1, 4, **connection_options)
+            _CONNECTION_POOL_KEY = pool_key
+        connection = _CONNECTION_POOL.getconn()
+        connection.autocommit = False
+        return connection
+
+
+def release_connection(connection) -> None:
+    """Return a borrowed connection to the pool in a clean transaction state."""
+    if connection is None:
+        return
+    with _CONNECTION_POOL_LOCK:
+        if _CONNECTION_POOL is None:
+            connection.close()
+            return
+        try:
+            if not connection.closed:
+                connection.rollback()
+            _CONNECTION_POOL.putconn(connection, close=bool(connection.closed))
+        except Exception:
+            connection.close()
 
 
 def ensure_database_exists() -> tuple[bool, str]:
@@ -128,6 +170,7 @@ def ensure_database_exists() -> tuple[bool, str]:
 
 def test_connection() -> tuple[bool, str]:
     """Test connection to the PostgreSQL server and database."""
+    conn = None
     try:
         ensure_ok, ensure_msg = ensure_database_exists()
         if not ensure_ok:
@@ -137,10 +180,11 @@ def test_connection() -> tuple[bool, str]:
         with conn.cursor() as cur:
             cur.execute("SELECT version();")
             version = cur.fetchone()[0]
-        conn.close()
         return True, f"Kết nối thành công! Phiên bản: {version.split(',')[0]}"
     except Exception as error:
         return False, f"Lỗi kết nối cơ sở dữ liệu: {error}"
+    finally:
+        release_connection(conn)
 
 
 def init_db() -> tuple[bool, str]:
@@ -166,12 +210,14 @@ def init_db() -> tuple[bool, str]:
     CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
     """
+    conn = None
     try:
         conn = get_connection()
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute(schema_sql)
-        conn.close()
         return True, "Khởi tạo bảng cơ sở dữ liệu thành công."
     except Exception as error:
         return False, f"Không thể khởi tạo cơ sở dữ liệu: {error}"
+    finally:
+        release_connection(conn)

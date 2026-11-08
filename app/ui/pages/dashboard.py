@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QDateTime, QPointF, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
     QFrame,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.services.network_metrics import NetworkMetricsCollector, NetworkSnapshot
 from app.ui.icons import icon
 
 
@@ -51,12 +52,16 @@ class Sparkline(QWidget):
             return
         gap = 2.0
         width = max(2.0, (self.width() - gap * (count - 1)) / count)
-        maximum = max(self.values)
+        maximum = max(1.0, max(self.values))
         for index, value in enumerate(self.values):
             height = (value / maximum) * (self.height() - 2)
             rect = QRectF(index * (width + gap), self.height() - height, width, height)
             painter.setBrush(self.color)
             painter.drawRoundedRect(rect, 1.0, 1.0)
+
+    def append_value(self, value: float) -> None:
+        self.values = [*self.values[-11:], max(0.0, value)]
+        self.update()
 
 
 class MetricCard(QFrame):
@@ -72,11 +77,16 @@ class MetricCard(QFrame):
         layout.setContentsMargins(10, 7, 10, 7)
         layout.setSpacing(8)
 
-        # 1. Subtle, neutral icon container
+        # 1. Color-coded icon container for fast KPI recognition.
         badge = QLabel()
         badge.setObjectName("metricIcon")
-        badge.setStyleSheet("background: #232047; border: 1px solid #322D60; border-radius: 9px;")
-        badge.setPixmap(icon(metric.icon_name, "#9E9BB5", 15).pixmap(15, 15))
+        accent = QColor(metric.color)
+        red, green, blue = accent.red(), accent.green(), accent.blue()
+        badge.setStyleSheet(
+            f"background: rgba({red}, {green}, {blue}, 0.16); "
+            f"border: 1px solid rgba({red}, {green}, {blue}, 0.38); border-radius: 9px;"
+        )
+        badge.setPixmap(icon(metric.icon_name, metric.color, 17).pixmap(17, 17))
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badge.setFixedSize(32, 32)
         layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -92,10 +102,10 @@ class MetricCard(QFrame):
         title.setStyleSheet("color: #9E9BB5; font-size: 11px; font-weight: 500;")
         center.addWidget(title)
 
-        val_lbl = QLabel(metric.value)
-        val_lbl.setObjectName("metricValue")
-        val_lbl.setStyleSheet("color: #FFFFFF; font-size: 17px; font-weight: 700; letter-spacing: -0.3px;")
-        center.addWidget(val_lbl)
+        self.value_label = QLabel(metric.value)
+        self.value_label.setObjectName("metricValue")
+        self.value_label.setStyleSheet("color: #FFFFFF; font-size: 17px; font-weight: 700; letter-spacing: -0.3px;")
+        center.addWidget(self.value_label)
 
         layout.addLayout(center, 1)
 
@@ -105,19 +115,24 @@ class MetricCard(QFrame):
         right.setSpacing(3)
         right.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        pill = QLabel(metric.change)
-        pill.setObjectName("metricChange")
-        pill.setStyleSheet(
+        self.change_label = QLabel(metric.change)
+        self.change_label.setObjectName("metricChange")
+        self.change_label.setStyleSheet(
             f"color: {metric.color}; background: rgba(255, 255, 255, 0.06); border-radius: 4px; padding: 1px 5px; font-size: 10px; font-weight: 600;"
         )
-        pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        right.addWidget(pill, 0, Qt.AlignmentFlag.AlignRight)
+        self.change_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right.addWidget(self.change_label, 0, Qt.AlignmentFlag.AlignRight)
 
-        spark = Sparkline([2, 4, 3, 7, 5, 9, 7, 12, 9, 14, 10, 18], metric.color)
-        spark.setFixedSize(42, 16)
-        right.addWidget(spark, 0, Qt.AlignmentFlag.AlignRight)
+        self.sparkline = Sparkline([0.0] * 12, metric.color)
+        self.sparkline.setFixedSize(42, 16)
+        right.addWidget(self.sparkline, 0, Qt.AlignmentFlag.AlignRight)
 
         layout.addLayout(right)
+
+    def set_data(self, value: str, change: str, spark_value: float) -> None:
+        self.value_label.setText(value)
+        self.change_label.setText(change)
+        self.sparkline.append_value(spark_value)
 
 
 class SystemCard(QFrame):
@@ -135,8 +150,11 @@ class SystemCard(QFrame):
 
         badge = QLabel()
         badge.setObjectName("metricIcon")
-        badge.setStyleSheet("background: #232047; border: 1px solid #322D60; border-radius: 9px;")
-        badge.setPixmap(icon("shield", "#9E9BB5", 15).pixmap(15, 15))
+        badge.setStyleSheet(
+            "background: rgba(59, 130, 246, 0.16); "
+            "border: 1px solid rgba(59, 130, 246, 0.38); border-radius: 9px;"
+        )
+        badge.setPixmap(icon("shield", "#3B82F6", 17).pixmap(17, 17))
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badge.setFixedSize(32, 32)
         layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -155,6 +173,7 @@ class SystemCard(QFrame):
         val_lbl.setObjectName("systemGood")
         val_lbl.setStyleSheet("color: #FFFFFF; font-size: 15px; font-weight: 700;")
         center.addWidget(val_lbl)
+        self.value_label = val_lbl
 
         layout.addLayout(center, 1)
 
@@ -163,30 +182,41 @@ class SystemCard(QFrame):
         right.setSpacing(3)
         right.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        pill = QLabel("● 94%")
+        pill = QLabel("● Live")
         pill.setStyleSheet(
             "color: #10B981; background: rgba(16, 185, 129, 0.12); border-radius: 4px; padding: 1px 5px; font-size: 10px; font-weight: 700;"
         )
         pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
         right.addWidget(pill, 0, Qt.AlignmentFlag.AlignRight)
+        self.state_label = pill
 
         progress = QProgressBar()
         progress.setObjectName("healthProgress")
         progress.setRange(0, 100)
-        progress.setValue(94)
+        progress.setValue(100)
         progress.setTextVisible(False)
         progress.setFixedSize(42, 5)
         right.addWidget(progress, 0, Qt.AlignmentFlag.AlignRight)
+        self.progress = progress
 
         layout.addLayout(right)
 
+    def set_available(self, available: bool) -> None:
+        self.value_label.setText("Đang hoạt động" if available else "Không có dữ liệu")
+        self.state_label.setText("● Live" if available else "● Offline")
+        color = "#10B981" if available else "#FF5B79"
+        self.state_label.setStyleSheet(
+            f"color: {color}; background: rgba(255, 255, 255, 0.06); "
+            "border-radius: 4px; padding: 1px 5px; font-size: 10px; font-weight: 700;"
+        )
+        self.progress.setValue(100 if available else 0)
+
 
 class TrafficChart(QWidget):
-    incoming = [72, 112, 88, 148, 105, 120, 169, 143, 204, 129, 111, 134, 149, 113, 89, 137, 126, 158, 181, 175, 204, 119, 142, 163, 165, 116, 139, 121, 133, 110, 201, 148, 127, 142]
-    outgoing = [51, 79, 93, 82, 122, 111, 75, 60, 83, 126, 89, 102, 77, 105, 84, 59, 96, 75, 101, 72, 137, 116, 81, 103, 114, 87, 75, 106, 93, 82, 139, 111, 75, 108]
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.incoming: list[float] = [0.0] * 34
+        self.outgoing: list[float] = [0.0] * 34
         self.setMinimumHeight(280)
         self.setMinimumWidth(220)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -198,31 +228,36 @@ class TrafficChart(QWidget):
 
         left, top, right, bottom = 38, 14, 10, 24
         chart = QRectF(left, top, self.width() - left - right, self.height() - top - bottom)
+        raw_maximum = max([1.0, *self.incoming, *self.outgoing])
+        maximum = max(1.0, math.ceil(raw_maximum / 10.0) * 10.0) if raw_maximum > 10 else max(1.0, math.ceil(raw_maximum * 2) / 2)
 
         painter.setFont(QFont("Segoe UI", 8))
         for step in range(7):
             y = chart.bottom() - chart.height() * step / 6
             painter.setPen(QColor("#8E8BA7"))
-            painter.drawText(QRectF(0, y - 8, left - 8, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, str(step * 50))
+            tick = maximum * step / 6
+            tick_text = f"{tick:.1f}" if maximum < 10 else str(int(tick))
+            painter.drawText(QRectF(0, y - 8, left - 8, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, tick_text)
             painter.setPen(QPen(QColor("#282452"), 1, Qt.PenStyle.DashLine))
             painter.drawLine(QPointF(chart.left(), y), QPointF(chart.right(), y))
 
-        time_labels = ["10:14", "10:16", "10:18", "10:20", "10:22", "10:24"]
+        now = QDateTime.currentDateTime()
+        time_labels = [now.addSecs(-(5 - index) * 6).toString("HH:mm:ss") for index in range(6)]
         painter.setPen(QColor("#8E8BA7"))
         for step, label in enumerate(time_labels):
             x = chart.left() + chart.width() * step / (len(time_labels) - 1)
             painter.drawText(QRectF(x - 22, chart.bottom() + 5, 44, 16), Qt.AlignmentFlag.AlignCenter, label)
 
-        self._draw_series(painter, chart, self.outgoing, QColor("#10B981"), fill_alpha=65)
-        self._draw_series(painter, chart, self.incoming, QColor("#8B5CF6"), fill_alpha=45)
+        self._draw_series(painter, chart, self.outgoing, maximum, QColor("#10B981"), fill_alpha=65)
+        self._draw_series(painter, chart, self.incoming, maximum, QColor("#8B5CF6"), fill_alpha=45)
 
     @staticmethod
-    def _draw_series(painter: QPainter, chart: QRectF, values: list[int], color: QColor, fill_alpha: int = 50) -> None:
+    def _draw_series(painter: QPainter, chart: QRectF, values: list[float], maximum: float, color: QColor, fill_alpha: int = 50) -> None:
         count = len(values)
         if count < 2:
             return
         points = [
-            QPointF(chart.left() + chart.width() * i / (count - 1), chart.bottom() - chart.height() * value / 300)
+            QPointF(chart.left() + chart.width() * i / (count - 1), chart.bottom() - chart.height() * value / maximum)
             for i, value in enumerate(values)
         ]
         path = QPainterPath(points[0])
@@ -242,6 +277,11 @@ class TrafficChart(QWidget):
         painter.setPen(QPen(color, 2.2))
         painter.drawPath(path)
 
+    def append_sample(self, incoming_mbps: float, outgoing_mbps: float) -> None:
+        self.incoming = [*self.incoming[-33:], max(0.0, incoming_mbps)]
+        self.outgoing = [*self.outgoing[-33:], max(0.0, outgoing_mbps)]
+        self.update()
+
 
 class DonutChart(QWidget):
     def __init__(self, segments: list[tuple[float, str]], center_top: str, center_value: str, center_bottom: str, parent: QWidget | None = None) -> None:
@@ -252,6 +292,13 @@ class DonutChart(QWidget):
         self.center_bottom = center_bottom
         self.setMinimumSize(120, 120)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def set_data(self, segments: list[tuple[float, str]], center_value: str, center_bottom: str | None = None) -> None:
+        self.segments = segments
+        self.center_value = center_value
+        if center_bottom is not None:
+            self.center_bottom = center_bottom
+        self.update()
 
     def paintEvent(self, event) -> None:
         del event
@@ -435,6 +482,9 @@ def protocol_bar_row(color: str, label: str, value: str, percent: float) -> QWid
     val.setStyleSheet("color: #FFFFFF; font-weight: 600; font-size: 11px;")
     layout.addWidget(val)
 
+    row.value_label = val
+    row.progress_bar = bar
+
     return row
 
 
@@ -446,6 +496,9 @@ def ratio_stat_card(
     percent_val: float,
     parent: QWidget | None = None,
 ) -> QWidget:
+    accent = QColor(color)
+    red, green, blue = accent.red(), accent.green(), accent.blue()
+    readable_color = accent.lighter(155).name()
     card = QFrame(parent)
     card.setObjectName("ratioStatCard")
     card.setStyleSheet(f"""
@@ -481,8 +534,9 @@ def ratio_stat_card(
 
     pill = QLabel(percent_str)
     pill.setStyleSheet(
-        f"color: {color}; font-weight: 700; font-size: 11px; "
-        f"background: {color}1F; border: 1px solid {color}33; "
+        f"color: {readable_color}; font-weight: 700; font-size: 11px; "
+        f"background: rgba({red}, {green}, {blue}, 0.20); "
+        f"border: 1px solid rgba({red}, {green}, {blue}, 0.52); "
         f"border-radius: 4px; padding: 1px 6px;"
     )
     top_line.addWidget(pill)
@@ -522,6 +576,11 @@ def ratio_stat_card(
         }}
     """)
     layout.addWidget(bar)
+
+    card.count_label = cnt
+    card.percent_label = pill
+    card.progress_bar = bar
+    card.accent_color = color
 
     return card
 
@@ -642,6 +701,7 @@ class StatusModule(QFrame):
 class DashboardPage(QScrollArea):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.collector = NetworkMetricsCollector()
         self.setObjectName("dashboardScroll")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -669,15 +729,15 @@ class DashboardPage(QScrollArea):
         title_box.addWidget(subheading)
         header_box.addLayout(title_box, 1)
 
-        live_badge = QLabel("●  AI DEFENSE: ACTIVE")
-        live_badge.setObjectName("liveBadge")
-        header_box.addWidget(live_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.live_badge = QLabel("●  LIVE SYSTEM METRICS")
+        self.live_badge.setObjectName("liveBadge")
+        header_box.addWidget(self.live_badge, 0, Qt.AlignmentFlag.AlignVCenter)
         root.addLayout(header_box)
 
-        # 2. Hàng trên kết hợp: Biểu đồ lưu lượng thời gian thực (phần lớn 60-65%) + Cột dọc các chỉ số & Tỷ lệ (35-40%)
         top_row = QGridLayout()
         top_row.setSpacing(12)
 
+        # 2. Hàng trên kết hợp: Biểu đồ lưu lượng thời gian thực (phần lớn 60-65%) + Cột dọc các chỉ số & Tỷ lệ (35-40%)
         # Cột trái (phần lớn 62%): Lưu lượng mạng theo thời gian thực
         traffic_extra = QWidget()
         t_lay = QHBoxLayout(traffic_extra)
@@ -685,76 +745,79 @@ class DashboardPage(QScrollArea):
         t_lay.setSpacing(10)
         t_lay.addWidget(legend_row("#8B5CF6", "Vào", ""))
         t_lay.addWidget(legend_row("#10B981", "Ra", ""))
-        speed_badge = QLabel("142 Mbps")
-        speed_badge.setObjectName("panelChip")
-        t_lay.addWidget(speed_badge)
+        self.speed_badge = QLabel("0.00 Mbps")
+        self.speed_badge.setObjectName("panelChip")
+        t_lay.addWidget(self.speed_badge)
 
         traffic_panel = Panel("Lưu lượng mạng theo thời gian thực", "Băng thông trực tiếp", traffic_extra)
-        traffic_chart = TrafficChart()
-        traffic_panel.box.addWidget(traffic_chart, 1)
+        self.traffic_chart = TrafficChart()
+        traffic_panel.box.addWidget(self.traffic_chart, 1)
         top_row.addWidget(traffic_panel, 0, 0)
 
         # Cột phải (38%): Cột dọc gom các phần trên ảnh (6 thẻ chỉ số + Tỷ lệ lưu lượng)
+        # Khối 1: 6 Thẻ chỉ số cốt lõi (2 cột x 3 hàng)
         side_widget = QWidget()
         side_layout = QVBoxLayout(side_widget)
         side_layout.setContentsMargins(0, 0, 0, 0)
         side_layout.setSpacing(10)
 
-        # Khối 1: 6 Thẻ chỉ số cốt lõi (2 cột x 3 hàng)
         metrics_grid = QGridLayout()
         metrics_grid.setContentsMargins(0, 0, 0, 0)
         metrics_grid.setHorizontalSpacing(8)
         metrics_grid.setVerticalSpacing(8)
 
         data = [
-            Metric("Tổng gói tin", "1,248,536", "↑ 12.5%", "#8B5CF6", "box"),
-            Metric("Lưu lượng mạng", "245.6 Mbps", "↑ 8.3%", "#A78BFA", "nodes"),
-            Metric("Kết nối hoạt động", "1,326", "↑ 5.1%", "#10B981", "nodes"),
-            Metric("Phát hiện bất thường", "27", "↑ 3.2%", "#FF5B79", "warning"),
-            Metric("Luồng bị chặn", "12", "20.0%", "#FF8A4C", "blocked"),
+            Metric("Tổng gói tin", "—", "OS", "#3B82F6", "box"),
+            Metric("Lưu lượng mạng", "—", "Live", "#8B5CF6", "nodes"),
+            Metric("Kết nối hoạt động", "—", "OS", "#10B981", "nodes"),
+            Metric("Phát hiện bất thường", "0", "Chưa có IDS", "#FF5B79", "warning"),
+            Metric("Luồng bị chặn", "0", "Chưa có IPS", "#FF8A4C", "blocked"),
         ]
 
-        metrics_grid.addWidget(MetricCard(data[0]), 0, 0)
-        metrics_grid.addWidget(MetricCard(data[1]), 0, 1)
-        metrics_grid.addWidget(MetricCard(data[2]), 1, 0)
-        metrics_grid.addWidget(MetricCard(data[3]), 1, 1)
-        metrics_grid.addWidget(MetricCard(data[4]), 2, 0)
-        metrics_grid.addWidget(SystemCard(), 2, 1)
+        self.metric_cards = [MetricCard(metric) for metric in data]
+        metrics_grid.addWidget(self.metric_cards[0], 0, 0)
+        metrics_grid.addWidget(self.metric_cards[1], 0, 1)
+        metrics_grid.addWidget(self.metric_cards[2], 1, 0)
+        metrics_grid.addWidget(self.metric_cards[3], 1, 1)
+        metrics_grid.addWidget(self.metric_cards[4], 2, 0)
+        self.system_card = SystemCard()
+        metrics_grid.addWidget(self.system_card, 2, 1)
 
         metrics_grid.setColumnStretch(0, 1)
         metrics_grid.setColumnStretch(1, 1)
         side_layout.addLayout(metrics_grid)
 
         # Khối 2: Tỷ lệ lưu lượng (Bố cục ngang cân đối, không còn khoảng trống thừa)
-        ratio_badge = QLabel("92.4% An toàn")
-        ratio_badge.setObjectName("panelChip")
-        ratio_badge.setStyleSheet(
+        self.ratio_badge = QLabel("Đang thu thập")
+        self.ratio_badge.setObjectName("panelChip")
+        self.ratio_badge.setStyleSheet(
             "color: #10B981; background: rgba(16, 185, 129, 0.12); "
             "border: 1px solid rgba(16, 185, 129, 0.25); "
             "border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 700;"
         )
-        ratio_panel = Panel("Tỷ lệ lưu lượng", "Đánh giá an toàn gói tin mạng", ratio_badge)
+        ratio_panel = Panel("Tỷ lệ lưu lượng", "Chất lượng gói tin từ bộ đếm hệ điều hành", self.ratio_badge)
 
         ratio_body = QHBoxLayout()
         ratio_body.setContentsMargins(0, 4, 0, 0)
         ratio_body.setSpacing(12)
 
-        donut_widget = DonutChart([(92.4, "#8B5CF6"), (7.6, "#FF5B79")], "Tổng", "1.25M", "gói tin")
-        donut_widget.setFixedSize(125, 125)
-        ratio_body.addWidget(donut_widget, 0, Qt.AlignmentFlag.AlignCenter)
+        self.ratio_donut = DonutChart([(100.0, "#8B5CF6"), (0.0, "#FF5B79")], "Tổng", "—", "gói tin")
+        self.ratio_donut.setFixedSize(125, 125)
+        ratio_body.addWidget(self.ratio_donut, 0, Qt.AlignmentFlag.AlignCenter)
 
         cards_col = QVBoxLayout()
         cards_col.setContentsMargins(0, 0, 0, 0)
         cards_col.setSpacing(8)
-        cards_col.addWidget(ratio_stat_card("Bình thường", "1,153,647", "92.4%", "#8B5CF6", 92.4))
-        cards_col.addWidget(ratio_stat_card("Bất thường", "94,889", "7.6%", "#FF5B79", 7.6))
+        self.normal_ratio_card = ratio_stat_card("Bình thường", "—", "—", "#8B5CF6", 0.0)
+        self.error_ratio_card = ratio_stat_card("Lỗi / bị loại", "—", "—", "#FF5B79", 0.0)
+        cards_col.addWidget(self.normal_ratio_card)
+        cards_col.addWidget(self.error_ratio_card)
         ratio_body.addLayout(cards_col, 1)
 
         ratio_panel.box.addLayout(ratio_body)
         side_layout.addWidget(ratio_panel)
 
         top_row.addWidget(side_widget, 0, 1)
-
         top_row.setColumnStretch(0, 62)
         top_row.setColumnStretch(1, 38)
         root.addLayout(top_row)
@@ -766,24 +829,26 @@ class DashboardPage(QScrollArea):
         protocols_panel = Panel("Phân bố giao thức", "Tỷ trọng các giao thức truyền tải")
         proto_body = QHBoxLayout()
         proto_body.setSpacing(12)
-        proto_body.addWidget(
-            DonutChart(
-                [(48.2, "#2F9BFF"), (32.7, "#FF9B37"), (8.1, "#1ED28A"), (6.3, "#9551E8"), (2.8, "#F4C440"), (1.9, "#7671BF")],
-                "Giao thức", "6 loại", "1.25M gói"
-            ),
-            1
+        self.protocol_donut = DonutChart(
+            [(0.0, "#2F9BFF"), (0.0, "#FF9B37"), (0.0, "#1ED28A"), (0.0, "#9551E8"), (0.0, "#F4C440"), (0.0, "#7671BF")],
+            "Giao thức", "0", "kết nối"
         )
+        proto_body.addWidget(self.protocol_donut, 1)
         proto_legend = QVBoxLayout()
         proto_legend.setSpacing(4)
-        for color, label, value, percent in [
-            ("#2F9BFF", "TCP", "48.2%", 48.2),
-            ("#FF9B37", "UDP", "32.7%", 32.7),
-            ("#1ED28A", "ICMP", "8.1%", 8.1),
-            ("#9551E8", "HTTP", "6.3%", 6.3),
-            ("#F4C440", "DNS", "2.8%", 2.8),
-            ("#7671BF", "Khác", "1.9%", 1.9),
-        ]:
-            proto_legend.addWidget(protocol_bar_row(color, label, value, percent))
+        self.protocol_specs = [
+            ("TCP", "#2F9BFF"),
+            ("UDP", "#FF9B37"),
+            ("ICMP", "#1ED28A"),
+            ("HTTP", "#9551E8"),
+            ("DNS", "#F4C440"),
+            ("Khác", "#7671BF"),
+        ]
+        self.protocol_rows = {}
+        for label, color in self.protocol_specs:
+            row = protocol_bar_row(color, label, "0.0%", 0.0)
+            self.protocol_rows[label] = row
+            proto_legend.addWidget(row)
         proto_legend.addStretch()
         proto_body.addLayout(proto_legend, 1)
         protocols_panel.box.addLayout(proto_body, 1)
@@ -791,8 +856,9 @@ class DashboardPage(QScrollArea):
 
         top_ips_badge = QLabel("Top 5")
         top_ips_badge.setObjectName("panelChip")
-        top_ips_panel = Panel("Top 5 nguồn IP theo lưu lượng", "Địa chỉ IP tiêu thụ băng thông lớn", top_ips_badge)
-        top_ips_panel.box.addWidget(self._ip_table())
+        top_ips_panel = Panel("Top 5 IP theo kết nối", "Địa chỉ từ các kết nối mạng đang quan sát", top_ips_badge)
+        self.ip_table = self._ip_table()
+        top_ips_panel.box.addWidget(self.ip_table)
         row3.addWidget(top_ips_panel, 0, 1)
 
         row3.setColumnStretch(0, 1)
@@ -803,36 +869,115 @@ class DashboardPage(QScrollArea):
         alerts_badge = QLabel("Real-time Log")
         alerts_badge.setObjectName("panelChip")
         alerts_panel = Panel("Cảnh báo an ninh gần đây", "Nhật ký phát hiện tấn công và hành vi khả nghi", alerts_badge)
-        alerts_panel.box.addWidget(self._alert_table())
+        self.alert_table = self._alert_table()
+        alerts_panel.box.addWidget(self.alert_table)
         root.addWidget(alerts_panel)
 
         # 6. Hàng 5: Trạng thái 4 thành phần hệ thống AI
-        status_badge = QLabel("4 Active")
+        status_badge = QLabel("1 nguồn dữ liệu")
         status_badge.setObjectName("panelChip")
         status_panel = Panel("Trạng thái các thành phần hệ thống", "Sức khỏe hạ tầng mạng và động cơ trí tuệ nhân tạo", status_badge)
         modules = QHBoxLayout()
         modules.setSpacing(10)
         for args in [
-            ("Giám sát mạng", "(Monitoring)", "activity", "Băng thông: 10 Gbps"),
-            ("Phát hiện bất thường", "(Detection)", "shield", "AI Model: Active"),
-            ("Dự đoán lưu lượng", "(Prediction)", "trend", "Dự báo: 5m tới"),
-            ("Giảm thiểu rủi ro", "(Mitigation)", "lock", "Quy tắc: 24 active"),
+            ("Giám sát mạng", "(Monitoring)", "activity", "Nguồn: hệ điều hành"),
+            ("Phát hiện bất thường", "(Detection)", "shield", "Chưa kết nối IDS"),
+            ("Dự đoán lưu lượng", "(Prediction)", "trend", "Chưa kết nối mô hình"),
+            ("Giảm thiểu rủi ro", "(Mitigation)", "lock", "Chưa kết nối IPS"),
         ]:
             modules.addWidget(StatusModule(*args), 1)
         status_panel.box.addLayout(modules)
         root.addWidget(status_panel)
 
         self.setWidget(content)
+        self.refresh_live_data()
+        self.live_timer = QTimer(self)
+        self.live_timer.timeout.connect(self.refresh_live_data)
+        self.live_timer.start(1000)
+
+    def refresh_live_data(self) -> None:
+        snapshot = self.collector.sample()
+        self.system_card.set_available(snapshot.available)
+        if not snapshot.available:
+            self.live_badge.setText("●  KHÔNG CÓ DỮ LIỆU HỆ THỐNG")
+            self.speed_badge.setText("— Mbps")
+            return
+
+        self.live_badge.setText("●  LIVE SYSTEM METRICS")
+        total_mbps = snapshot.incoming_mbps + snapshot.outgoing_mbps
+        self.speed_badge.setText(f"{total_mbps:.2f} Mbps")
+        self.traffic_chart.append_sample(snapshot.incoming_mbps, snapshot.outgoing_mbps)
+
+        previous_packets = getattr(self, "_last_total_packets", snapshot.total_packets)
+        packet_delta = max(0, snapshot.total_packets - previous_packets)
+        self._last_total_packets = snapshot.total_packets
+
+        self.metric_cards[0].set_data(f"{snapshot.total_packets:,}", f"+{packet_delta:,}/s", float(packet_delta))
+        self.metric_cards[1].set_data(f"{total_mbps:.2f} Mbps", "Live", total_mbps)
+        self.metric_cards[2].set_data(f"{snapshot.active_connections:,}", "OS", float(snapshot.active_connections))
+        self.metric_cards[3].set_data("0", "Chưa có IDS", 0.0)
+        self.metric_cards[4].set_data("0", "Chưa có IPS", 0.0)
+
+        rejected = snapshot.packet_errors + snapshot.dropped_packets
+        valid_packets = max(0, snapshot.total_packets - rejected)
+        valid_percent = (valid_packets / snapshot.total_packets * 100.0) if snapshot.total_packets else 0.0
+        rejected_percent = max(0.0, 100.0 - valid_percent) if snapshot.total_packets else 0.0
+        self.ratio_badge.setText(f"{valid_percent:.2f}% hợp lệ")
+        self.ratio_donut.set_data(
+            [(valid_percent, "#8B5CF6"), (rejected_percent, "#FF5B79")],
+            self._compact_number(snapshot.total_packets),
+        )
+        self._update_ratio_card(self.normal_ratio_card, valid_packets, valid_percent)
+        self._update_ratio_card(self.error_ratio_card, rejected, rejected_percent)
+
+        counts = snapshot.protocol_counts
+        total_connections = sum(counts.values())
+        segments: list[tuple[float, str]] = []
+        for label, color in self.protocol_specs:
+            count = counts.get(label, 0)
+            percent = count / total_connections * 100.0 if total_connections else 0.0
+            segments.append((percent, color))
+            row = self.protocol_rows[label]
+            row.value_label.setText(f"{percent:.1f}%")
+            row.progress_bar.setValue(round(percent))
+        self.protocol_donut.set_data(segments, f"{total_connections:,}", "kết nối")
+        self._update_ip_table(snapshot)
+
+    @staticmethod
+    def _compact_number(value: int) -> str:
+        if value >= 1_000_000_000:
+            return f"{value / 1_000_000_000:.2f}B"
+        if value >= 1_000_000:
+            return f"{value / 1_000_000:.2f}M"
+        if value >= 1_000:
+            return f"{value / 1_000:.1f}K"
+        return f"{value:,}"
+
+    @staticmethod
+    def _update_ratio_card(card: QWidget, count: int, percent: float) -> None:
+        card.count_label.setText(f"{count:,}")
+        card.percent_label.setText(f"{percent:.2f}%")
+        card.progress_bar.setValue(round(percent))
+
+    def _update_ip_table(self, snapshot: NetworkSnapshot) -> None:
+        rows = snapshot.top_remote_ips
+        total = sum(count for _, count in rows)
+        self.ip_table.setRowCount(len(rows))
+        for row_index, (address, count) in enumerate(rows):
+            percent = count / total * 100.0 if total else 0.0
+            self.ip_table.setRowHeight(row_index, 40)
+            self.ip_table.setCellWidget(row_index, 0, make_text_cell(address, color="#FFFFFF", is_mono=True, is_bold=True))
+            self.ip_table.setCellWidget(row_index, 1, make_text_cell(f"{count:,}", color="#CBD5E1", align_center=True))
+            self.ip_table.setCellWidget(row_index, 2, make_ip_progress_cell(f"{percent:.1f}%"))
+            self.ip_table.setCellWidget(
+                row_index,
+                3,
+                make_badge_cell("Quan sát", "rgba(16, 185, 129, 0.18)", "#6EE7B7", "rgba(16, 185, 129, 0.35)"),
+            )
 
     def _alert_table(self) -> QTableWidget:
         headers = ["Thời gian", "Loại cảnh báo", "Nguồn IP", "Đích IP", "Mức độ", "Trạng thái"]
-        rows = [
-            ["10:24:12", "⚠  Port Scan", "192.168.1.100", "192.168.1.10", "Cao", "Chưa xử lý"],
-            ["10:23:45", "⚡  DDoS Attack", "10.0.0.23", "192.168.1.10", "Nghiêm trọng", "Chưa xử lý"],
-            ["10:22:18", "📈  Abnormal Traffic", "192.168.1.50", "8.8.8.8", "Trung bình", "Đã xử lý"],
-            ["10:21:05", "🔒  Brute Force", "203.113.5.21", "192.168.1.10", "Cao", "Chưa xử lý"],
-            ["10:19:37", "🌐  Suspicious DNS", "192.168.1.77", "1.1.1.1", "Thấp", "Đã xử lý"],
-        ]
+        rows: list[list[str]] = []
 
         table = QTableWidget(len(rows), len(headers))
         table.setObjectName("dashboardTable")
@@ -843,7 +988,7 @@ class DashboardPage(QScrollArea):
         table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        table.setFixedHeight(236)
+        table.setFixedHeight(96)
 
         for c, h in enumerate(headers):
             item = QTableWidgetItem(h)
@@ -917,14 +1062,8 @@ class DashboardPage(QScrollArea):
         return table
 
     def _ip_table(self) -> QTableWidget:
-        headers = ["IP nguồn", "Gói tin", "Lưu lượng (MB)", "Tỷ lệ"]
-        rows = [
-            ["192.168.1.100", "245,632", "125.6", "19.7%"],
-            ["10.0.0.23", "198,456", "98.2", "15.9%"],
-            ["192.168.1.50", "156,789", "76.3", "12.6%"],
-            ["203.113.5.21", "123,567", "60.1", "9.9%"],
-            ["192.168.1.77", "98,234", "45.7", "7.9%"],
-        ]
+        headers = ["IP từ xa", "Kết nối", "Tỷ lệ", "Trạng thái"]
+        rows: list[list[str]] = []
 
         table = QTableWidget(len(rows), len(headers))
         table.setObjectName("dashboardTable")
@@ -962,9 +1101,9 @@ class DashboardPage(QScrollArea):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
 
-        table.setColumnWidth(1, 95)   # Gói tin
-        table.setColumnWidth(2, 115)  # Lưu lượng (MB)
-        table.setColumnWidth(3, 90)   # Tỷ lệ
+        table.setColumnWidth(1, 95)
+        table.setColumnWidth(2, 115)
+        table.setColumnWidth(3, 90)
 
         for row_index, row in enumerate(rows):
             table.setRowHeight(row_index, 40)

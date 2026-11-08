@@ -188,10 +188,14 @@ class Sidebar(QFrame):
         # 5. User Account Card (Thẻ thông tin người dùng rộng rãi + Nút Đăng xuất)
         self.account = QFrame()
         self.account.setObjectName("accountCard")
-        self.account.setFixedHeight(74)
-        self.account_layout = QHBoxLayout(self.account)
-        self.account_layout.setContentsMargins(14, 8, 12, 8)
-        self.account_layout.setSpacing(12)
+        self.account.setFixedHeight(108)
+        self.account_layout = QVBoxLayout(self.account)
+        self.account_layout.setContentsMargins(16, 6, 16, 6)
+        self.account_layout.setSpacing(6)
+
+        self.identity_row = QHBoxLayout()
+        self.identity_row.setContentsMargins(0, 0, 0, 0)
+        self.identity_row.setSpacing(12)
 
         avatar = QLabel()
         avatar.setObjectName("avatar")
@@ -199,7 +203,7 @@ class Sidebar(QFrame):
         avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
         avatar.setFixedSize(44, 44)
         self.avatar = avatar
-        self.account_layout.addWidget(avatar)
+        self.identity_row.addWidget(avatar)
 
         # Tên người dùng và vai trò nằm trên 2 dòng tách biệt
         self.account_info = QWidget()
@@ -212,10 +216,11 @@ class Sidebar(QFrame):
 
         self.account_role = QLabel("Quản trị viên")
         self.account_role.setObjectName("accountRole")
+        self.account_role.hide()
 
         info_layout.addWidget(self.account_name)
-        info_layout.addWidget(self.account_role)
-        self.account_layout.addWidget(self.account_info, 1)
+        self.identity_row.addWidget(self.account_info, 1)
+        self.account_layout.addLayout(self.identity_row)
 
         # Proxy giữ tương thích ngược
         self.account_text = AccountTextProxy(self.account_name, self.account_role, self)
@@ -223,16 +228,18 @@ class Sidebar(QFrame):
         # Nút Đăng xuất tiện dụng
         self.logout_button = HoverIconButton(
             icon_name="logout",
-            normal_color="#8E8BA7",
+            normal_color="#F87171",
             hover_color="#EF4444",
             size=18,
         )
         self.logout_button.setObjectName("sidebarLogout")
-        self.logout_button.setFixedSize(34, 34)
+        self.logout_button.setText("  Đăng xuất")
+        self.logout_button.setFixedHeight(34)
+        self.logout_button.setFixedWidth(232)
         self.logout_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.logout_button.setToolTip("Đăng xuất tài khoản")
         self.logout_button.clicked.connect(self.logout_requested)
-        self.account_layout.addWidget(self.logout_button)
+        self.account_layout.addWidget(self.logout_button, 0, Qt.AlignmentFlag.AlignHCenter)
 
         outer.addWidget(self.account)
         self.select("dashboard")
@@ -300,9 +307,12 @@ class Sidebar(QFrame):
             btn.style().polish(btn)
 
         # Account card
+        self.account.setFixedHeight(104 if collapsed else 108)
         self.account_info.setVisible(not collapsed)
-        self.logout_button.setVisible(not collapsed)
-        self.account_layout.setContentsMargins(18 if collapsed else 14, 8, 18 if collapsed else 12, 8)
+        self.logout_button.setVisible(True)
+        self.logout_button.setText("" if collapsed else "  Đăng xuất")
+        self.logout_button.setFixedWidth(34 if collapsed else 232)
+        self.account_layout.setContentsMargins(18 if collapsed else 16, 6, 18 if collapsed else 16, 6)
 
         self.setProperty("collapsed", collapsed)
         self.style().unpolish(self)

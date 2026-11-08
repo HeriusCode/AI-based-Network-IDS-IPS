@@ -149,10 +149,10 @@ QPushButton#navButton[collapsed="true"] {
 }
 
 #accountCard {
-    background: #1B1938;
-    border: 1px solid #282452;
-    border-radius: 18px;
-    margin: 6px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    margin: 0;
 }
 
 #avatar {
@@ -202,12 +202,15 @@ QPushButton#sidebarCollapse:hover {
 
 QPushButton#sidebarLogout {
     background: transparent;
-    border: 1px solid transparent;
+    border: 1px solid #282452;
     border-radius: 10px;
-    min-width: 34px;
-    max-width: 34px;
     min-height: 34px;
     max-height: 34px;
+    color: #B8B5D2;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    padding: 0 12px;
 }
 
 QPushButton#sidebarLogout:hover {
@@ -244,21 +247,21 @@ QPushButton#sidebarLogout:hover {
 }
 
 #topbarClockCard {
-    background: #1B1938;
-    border: 1px solid #282452;
-    border-radius: 14px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
 }
 
 #topbarClock {
     color: #FFFFFF;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 700;
 }
 
 #topbarDate {
-    color: #8E8BA7;
-    font-size: 9px;
-    font-weight: 500;
+    color: #B8B5D2;
+    font-size: 12px;
+    font-weight: 600;
 }
 
 #topbarSeparator {
@@ -268,8 +271,8 @@ QPushButton#sidebarLogout:hover {
 }
 
 QPushButton#topIconButton {
-    background: #1B1938;
-    border: 1px solid #282452;
+    background: transparent;
+    border: none;
     min-width: 34px;
     max-width: 34px;
     min-height: 34px;
@@ -278,8 +281,8 @@ QPushButton#topIconButton {
 }
 
 QPushButton#topIconButton:hover {
-    background: #25224D;
-    border-color: #6C5DD3;
+    background: rgba(139, 92, 246, 0.12);
+    border: none;
 }
 
 QPushButton#windowButton,

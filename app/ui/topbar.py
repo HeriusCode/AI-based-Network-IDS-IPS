@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -68,20 +67,20 @@ class Topbar(QFrame):
         clock_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         clock_layout.addWidget(clock_icon)
 
-        clock_box = QVBoxLayout()
+        clock_box = QHBoxLayout()
         clock_box.setContentsMargins(0, 0, 0, 0)
-        clock_box.setSpacing(0)
+        clock_box.setSpacing(8)
 
         self.clock = QLabel()
         self.clock.setObjectName("topbarClock")
-        self.clock.setFixedHeight(16)
+        self.clock.setFixedHeight(24)
 
         self.date = QLabel()
         self.date.setObjectName("topbarDate")
-        self.date.setFixedHeight(12)
+        self.date.setFixedHeight(24)
 
-        clock_box.addWidget(self.clock)
-        clock_box.addWidget(self.date)
+        clock_box.addWidget(self.clock, 0, Qt.AlignmentFlag.AlignVCenter)
+        clock_box.addWidget(self.date, 0, Qt.AlignmentFlag.AlignVCenter)
         clock_layout.addLayout(clock_box)
 
         layout.addWidget(clock_card, 0, Qt.AlignmentFlag.AlignVCenter)

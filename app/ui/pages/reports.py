@@ -1,6 +1,8 @@
-"""Reports and system logs page using simulated security records."""
+"""Reports and system logs page without fabricated security records."""
 
 from __future__ import annotations
+
+from datetime import datetime
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor, QPalette
@@ -30,35 +32,39 @@ from app.ui.pages.monitoring import Chart, MetricCard, MonitorMetric, Panel, leg
 legend = legend_chip
 
 
-REPORTS_DATA = [
-    ["#RPT024", "Báo cáo tổng quan an ninh định kỳ ngày", "Định kỳ", "24/04/2025 00:00", "24/04/2025 23:59", "5,281", "127", "82", "Hoàn thành"],
-    ["#RPT023", "Báo cáo phân tích lưu lượng tấn công DDoS SYN", "Tấn công", "24/04/2025 08:00", "24/04/2025 12:00", "642", "35", "28", "Hoàn thành"],
-    ["#RPT022", "Báo cáo phân tích băng thông & lưu lượng mạng", "Lưu lượng", "23/04/2025 00:00", "23/04/2025 23:59", "4,912", "101", "67", "Hoàn thành"],
-    ["#RPT021", "Báo cáo hiệu quả can thiệp giảm thiểu IPS", "Giảm thiểu", "22/04/2025 00:00", "22/04/2025 23:59", "3,421", "89", "145", "Hoàn thành"],
-    ["#RPT020", "Báo cáo kiểm toán tuân thủ hệ thống SOC", "Hệ thống", "21/04/2025 00:00", "21/04/2025 23:59", "2,983", "72", "41", "Hoàn thành"],
-    ["#RPT019", "Báo cáo hành vi dò quét cổng mạng Port Scan", "Tấn công", "20/04/2025 14:00", "20/04/2025 18:00", "1,240", "44", "38", "Hoàn thành"],
-    ["#RPT018", "Báo cáo trạng thái đồng bộ Ryu OpenFlow Switch", "Hệ thống", "20/04/2025 00:00", "20/04/2025 23:59", "3,110", "18", "12", "Hoàn thành"],
-    ["#RPT017", "Báo cáo dự báo tăng trưởng băng thông 7 ngày", "Lưu lượng", "19/04/2025 00:00", "19/04/2025 23:59", "5,640", "95", "60", "Hoàn thành"],
-    ["#RPT016", "Báo cáo tấn công Brute Force SSH nội bộ", "Tấn công", "18/04/2025 02:00", "18/04/2025 06:00", "890", "52", "45", "Hoàn thành"],
-    ["#RPT015", "Báo cáo thống kê nạp OpenFlow Flow Rules", "Giảm thiểu", "17/04/2025 00:00", "17/04/2025 23:59", "4,120", "64", "88", "Hoàn thành"],
-    ["#RPT014", "Báo cáo định kỳ hiệu năng mô hình AI IDS", "Định kỳ", "16/04/2025 00:00", "16/04/2025 23:59", "5,020", "110", "75", "Hoàn thành"],
-    ["#RPT013", "Báo cáo kiểm định an toàn máy chủ ứng dụng", "Hệ thống", "15/04/2025 00:00", "15/04/2025 23:59", "2,850", "31", "20", "Hoàn thành"],
-]
+REPORTS_DATA: list[list[str]] = []
 
-LOGS_DATA = [
-    ["#LOG8924", "24/04 14:32:11", "Cao", "Phát hiện bất thường", "192.168.1.10", "Phát hiện lưu lượng TCP bất thường (DDoS Attack) vượt ngưỡng 125 Mbps"],
-    ["#LOG8923", "24/04 14:31:05", "Trung bình", "Giảm thiểu rủi ro", "Firewall IPS", "Áp dụng rule IPS #IPS-101 chặn IP 10.0.0.23 (Thời gian: 30 phút)"],
-    ["#LOG8922", "24/04 14:29:48", "Thấp", "Giám sát lưu lượng", "Open vSwitch", "Lưu lượng giao diện s1-eth1 tăng đột biến đạt 125.4 Mbps"],
-    ["#LOG8921", "24/04 14:28:17", "Cao", "Phát hiện bất thường", "192.168.1.77", "Phát hiện chuỗi tấn công SQL Injection trong gói tin HTTP POST"],
-    ["#LOG8920", "24/04 14:26:09", "Trung bình", "Hệ thống SDN", "SDN Controller", "Kết nối OpenFlow switch s1 được đồng bộ lại với Ryu Controller"],
-    ["#LOG8919", "24/04 14:25:33", "Thấp", "Giám sát lưu lượng", "Target Server", "Lưu lượng UDP phản hồi máy chủ đạt 82.1 Mbps bình thường"],
-    ["#LOG8918", "24/04 14:20:45", "Cao", "Cảnh báo an ninh", "10.0.0.56", "Máy trạm nội bộ kết nối tới domain độc hại C2 botnet"],
-    ["#LOG8917", "24/04 14:18:12", "Thông tin", "Xác thực tài khoản", "SOC Admin", "Quản trị viên Thúy Hoan đăng nhập hệ thống từ console nội bộ"],
-    ["#LOG8916", "24/04 14:15:02", "Cao", "Phát hiện bất thường", "203.113.5.21", "Phát hiện quét cổng tốc độ cao Port Scan trên toàn bộ subnet"],
-    ["#LOG8915", "24/04 14:12:40", "Trung bình", "Giảm thiểu rủi ro", "Firewall IPS", "Áp dụng rate-limit 5 Mbps lên cổng 8080 do lưu lượng vượt ngưỡng"],
-    ["#LOG8914", "24/04 14:10:15", "Thông tin", "Hệ thống SDN", "SDN Controller", "Ryu Controller hoàn tất nạp 5 flow rule mới xuống switch s1"],
-    ["#LOG8913", "24/04 14:08:22", "Thấp", "Giám sát lưu lượng", "Open vSwitch", "Khởi tạo luồng mạng mới giữa host h1 và host h4 qua cổng s1-eth2"],
-]
+LOGS_DATA: list[list[str]] = []
+
+
+def make_action_cell(actions: tuple[str, ...]) -> QWidget:
+    """Build the compact icon-only action group used by report and log rows."""
+    wrapper = QWidget()
+    row = QHBoxLayout(wrapper)
+    row.setContentsMargins(4, 0, 4, 0)
+    row.setSpacing(2)
+    row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+    action_specs = {
+        "view": ("eye", "#C4B5FD", "Xem chi tiết"),
+        "download": ("download", "#BFDBFE", "Tải báo cáo"),
+        "more": ("more_vertical", "#93C5FD", "Tùy chọn khác"),
+    }
+    for action_name in actions:
+        icon_name, color, tooltip = action_specs[action_name]
+        button = QPushButton()
+        button.setObjectName("tableActionButton")
+        button.setIcon(icon(icon_name, color, 14))
+        button.setToolTip(tooltip)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setFixedSize(25, 25)
+        button.setStyleSheet(
+            "QPushButton { background: transparent; border: none; border-radius: 5px; padding: 3px; }"
+            "QPushButton:hover { background: rgba(139, 92, 246, 0.20); }"
+            "QPushButton:pressed { background: rgba(139, 92, 246, 0.30); }"
+        )
+        row.addWidget(button)
+    return wrapper
 
 
 class DeviceEventRow(QWidget):
@@ -116,22 +122,23 @@ class ReportsPage(QScrollArea):
         title.setObjectName("reportsHeading")
         intro.addWidget(title)
 
-        subtitle = QLabel("Xem lịch sử hoạt động, tạo báo cáo thống kê và phân tích xu hướng an ninh mạng  •  Dữ liệu mô phỏng")
+        subtitle = QLabel("Xem lịch sử hoạt động, báo cáo thống kê và nhật ký từ nguồn dữ liệu hệ thống")
         subtitle.setObjectName("reportsSubtitle")
         subtitle.setWordWrap(True)
         intro.addWidget(subtitle)
         header.addLayout(intro, stretch=1)
 
         # Status Badge
-        status_badge = QLabel("●  AUDIT & COMPLIANCE READY")
+        status_badge = QLabel("●  CHƯA CÓ NGUỒN NHẬT KÝ")
         status_badge.setStyleSheet(
-            "background: rgba(16, 185, 129, 0.14); color: #34D399; "
-            "border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 10px; "
+            "background: rgba(245, 158, 11, 0.14); color: #FBBF24; "
+            "border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 10px; "
             "padding: 7px 16px; font-weight: 700; font-size: 11.5px;"
         )
         header.addWidget(status_badge)
 
-        date_btn = QPushButton("  24/04/2025 00:00  →  24/04/2025 23:59  ▾")
+        today = datetime.now().strftime("%d/%m/%Y")
+        date_btn = QPushButton(f"  {today} 00:00  →  {today} 23:59  ▾")
         date_btn.setObjectName("reportsDate")
         date_btn.setIcon(icon("calendar", "#A78BFA", 14))
         header.addWidget(date_btn)
@@ -151,11 +158,11 @@ class ReportsPage(QScrollArea):
         metrics.setHorizontalSpacing(10)
         metrics.setVerticalSpacing(10)
         metric_data = [
-            MonitorMetric("Tổng sự kiện ghi nhận", "5,281 Logs", "↑ 12.4%", "#3B82F6", "document"),
-            MonitorMetric("Sự kiện bất thường", "127 Cảnh báo", "↑ 25.7%", "#FF5B79", "warning"),
-            MonitorMetric("Can thiệp giảm thiểu", "82 Đã chặn", "↑ 18.9%", "#8B5CF6", "shield"),
-            MonitorMetric("Lưu lượng phân tích", "1.84 TB", "↑ 8.5%", "#FBBF24", "activity"),
-            MonitorMetric("Báo cáo tuân thủ", "24 Báo cáo", "● 100% Sẵn sàng", "#10B981", "check"),
+            MonitorMetric("Tổng sự kiện ghi nhận", "0 Logs", "Chưa có dữ liệu", "#3B82F6", "document"),
+            MonitorMetric("Sự kiện bất thường", "0 Cảnh báo", "Chưa có dữ liệu", "#FF5B79", "warning"),
+            MonitorMetric("Can thiệp giảm thiểu", "0 Đã chặn", "Chưa có dữ liệu", "#8B5CF6", "shield"),
+            MonitorMetric("Lưu lượng phân tích", "0 B", "Chưa có dữ liệu", "#FBBF24", "activity"),
+            MonitorMetric("Báo cáo tuân thủ", "0 Báo cáo", "Chưa có dữ liệu", "#10B981", "check"),
         ]
         for column, data in enumerate(metric_data):
             metrics.addWidget(MetricCard(data), 0, column)
@@ -183,11 +190,11 @@ class ReportsPage(QScrollArea):
 
         self.timeline_chart = Chart(
             [
-                ([44, 51, 68, 55, 66, 59, 74, 62, 91, 73, 110, 89, 121, 95, 149, 112, 139, 168, 124, 137, 154, 109, 82, 97, 79, 103, 71, 115, 126, 96, 68, 78], "#3B82F6"),
-                ([22, 31, 29, 42, 34, 38, 51, 41, 62, 48, 70, 53, 77, 59, 82, 61, 93, 66, 73, 58, 69, 52, 45, 51, 42, 60, 38, 65, 53, 47, 34, 41], "#FF5B79"),
-                ([11, 18, 14, 21, 17, 23, 19, 28, 22, 31, 24, 29, 22, 34, 27, 42, 31, 37, 29, 33, 25, 28, 19, 23, 18, 31, 21, 34, 24, 26, 17, 22], "#10B981"),
+                ([0.0] * 32, "#3B82F6"),
+                ([0.0] * 32, "#FF5B79"),
+                ([0.0] * 32, "#10B981"),
             ],
-            200,
+            1,
             ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "24:00"],
         )
         self.timeline_chart.setMinimumHeight(220)
@@ -196,7 +203,7 @@ class ReportsPage(QScrollArea):
         overview.addWidget(timeline, 0, 0)
 
         # 3.2 Phân loại sự kiện (Donut) & Sự kiện theo thiết bị nguồn (Bars)
-        dist_badge = QLabel("5 Thiết bị")
+        dist_badge = QLabel("0 Thiết bị")
         dist_badge.setStyleSheet(
             "color: #C4B5FD; background: rgba(139, 92, 246, 0.15); "
             "border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 700;"
@@ -213,15 +220,9 @@ class ReportsPage(QScrollArea):
 
         # Donut Chart - Pinned to top, perfectly sized
         donut = DonutChart(
-            [
-                (52.3, "#3B82F6"),
-                (18.7, "#8B5CF6"),
-                (15.5, "#F59E0B"),
-                (8.2, "#10B981"),
-                (5.3, "#94A3B8"),
-            ],
+            [],
             "",
-            "5,281",
+            "0",
             "sự kiện",
         )
         donut.setFixedSize(170, 170)
@@ -232,15 +233,13 @@ class ReportsPage(QScrollArea):
         device_box = QVBoxLayout(device_widget)
         device_box.setContentsMargins(0, 0, 0, 0)
         device_box.setSpacing(9)
-        device_items = [
-            ("Firewall IPS", 1842, "#3B82F6"),
-            ("Open vSwitch", 1231, "#8B5CF6"),
-            ("Máy chủ đích", 987, "#F59E0B"),
-            ("SDN Controller", 632, "#10B981"),
-            ("Khác / Router", 589, "#94A3B8"),
-        ]
+        device_items: list[tuple[str, int, str]] = []
         for name, val, col in device_items:
-            device_box.addWidget(DeviceEventRow(name, val, 1842, col))
+            device_box.addWidget(DeviceEventRow(name, val, max(1, val), col))
+        empty_devices = QLabel("Chưa có thiết bị ghi nhận sự kiện")
+        empty_devices.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_devices.setStyleSheet("color: #8E8BA7; font-size: 12px;")
+        device_box.addWidget(empty_devices, 1)
 
         dist_body.addWidget(device_widget, 1, Qt.AlignmentFlag.AlignTop)
         dist_panel.box.addLayout(dist_body)
@@ -267,7 +266,7 @@ class ReportsPage(QScrollArea):
     # REPORTS TABLE PANEL (FULL WIDTH)
     # -------------------------------------------------------------------------
     def _reports_panel(self) -> Panel:
-        badge = QLabel("12 Báo cáo")
+        badge = QLabel("0 Báo cáo")
         badge.setStyleSheet(
             "color: #60A5FA; background: rgba(59, 130, 246, 0.15); "
             "border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 700;"
@@ -331,7 +330,7 @@ class ReportsPage(QScrollArea):
         self.reports_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.reports_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.reports_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.reports_table.setFixedHeight(240)
+        self.reports_table.setFixedHeight(110)
         self.reports_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.reports_table.setMinimumWidth(300)
         self.reports_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -367,7 +366,7 @@ class ReportsPage(QScrollArea):
         self.reports_table.setColumnWidth(6, 95)   # Bất thường
         self.reports_table.setColumnWidth(7, 95)   # Giảm thiểu
         self.reports_table.setColumnWidth(8, 115)  # Trạng thái
-        self.reports_table.setColumnWidth(9, 90)   # Hành động
+        self.reports_table.setColumnWidth(9, 100)  # Hành động
 
         type_colors = {
             "Định kỳ": ("rgba(59, 130, 246, 0.15)", "#60A5FA", "rgba(59, 130, 246, 0.35)"),
@@ -402,15 +401,16 @@ class ReportsPage(QScrollArea):
                 8,
                 make_badge_cell("● " + row[8], "rgba(16, 185, 129, 0.15)", "#10B981", "rgba(16, 185, 129, 0.35)"),
             )
-            # Action button
-            self.reports_table.setCellWidget(r, 9, make_text_cell("⇩ Tải PDF", "#38BDF8", is_bold=True, align_center=True))
+            # View, download and overflow actions, matching the reference layout.
+            self.reports_table.setCellWidget(r, 9, make_action_cell(("view", "download", "more")))
 
-        self.reports_table.selectRow(0)
+        if REPORTS_DATA:
+            self.reports_table.selectRow(0)
         panel.box.addWidget(self.reports_table)
 
         # Footer
         footer = QHBoxLayout()
-        self.report_count_label = QLabel(f"Hiển thị 1–{len(REPORTS_DATA)} / {len(REPORTS_DATA)} báo cáo")
+        self.report_count_label = QLabel("Chưa có báo cáo từ hệ thống")
         self.report_count_label.setObjectName("flowFooter")
         footer.addWidget(self.report_count_label)
         footer.addStretch()
@@ -456,7 +456,10 @@ class ReportsPage(QScrollArea):
             if is_visible:
                 visible_count += 1
 
-        self.report_count_label.setText(f"Hiển thị {visible_count} / {len(REPORTS_DATA)} báo cáo")
+        self.report_count_label.setText(
+            f"Hiển thị {visible_count} / {len(REPORTS_DATA)} báo cáo"
+            if REPORTS_DATA else "Chưa có báo cáo từ hệ thống"
+        )
         # Dynamic table height: shrinks when few rows, expands when full
         self.reports_table.setFixedHeight(min(260, max(110, 38 + visible_count * 34)))
         self._update_report_pages(visible_count)
@@ -465,7 +468,7 @@ class ReportsPage(QScrollArea):
     # SYSTEM LOGS PANEL (FULL WIDTH)
     # -------------------------------------------------------------------------
     def _logs_panel(self) -> Panel:
-        badge = QLabel("12 Nhật ký")
+        badge = QLabel("0 Nhật ký")
         badge.setStyleSheet(
             "color: #A78BFA; background: rgba(139, 92, 246, 0.15); "
             "border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 700;"
@@ -534,7 +537,7 @@ class ReportsPage(QScrollArea):
         self.logs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.logs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.logs_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.logs_table.setFixedHeight(260)
+        self.logs_table.setFixedHeight(110)
         self.logs_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.logs_table.setMinimumWidth(300)
         self.logs_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -568,7 +571,7 @@ class ReportsPage(QScrollArea):
         self.logs_table.setColumnWidth(3, 140)  # Loại sự kiện
         self.logs_table.setColumnWidth(4, 130)  # Thiết bị / Nguồn
         # col 5 = Stretch (Nội dung nhật ký)
-        self.logs_table.setColumnWidth(6, 85)   # Hành động
+        self.logs_table.setColumnWidth(6, 70)   # Hành động
 
         for r, row in enumerate(LOGS_DATA):
             self.logs_table.setRowHeight(r, 32)
@@ -598,15 +601,16 @@ class ReportsPage(QScrollArea):
             desc_widget.setToolTip(row[5])
             self.logs_table.setCellWidget(r, 5, desc_widget)
 
-            # Action button
-            self.logs_table.setCellWidget(r, 6, make_text_cell("👁 Chi tiết", "#8B5CF6", is_bold=True, align_center=True))
+            # Use the same line-eye icon as the report action column.
+            self.logs_table.setCellWidget(r, 6, make_action_cell(("view",)))
 
-        self.logs_table.selectRow(0)
+        if LOGS_DATA:
+            self.logs_table.selectRow(0)
         panel.box.addWidget(self.logs_table)
 
         # Footer
         footer = QHBoxLayout()
-        self.log_count_label = QLabel(f"Hiển thị 1–{len(LOGS_DATA)} / {len(LOGS_DATA)} nhật ký")
+        self.log_count_label = QLabel("Chưa có nhật ký hệ thống")
         self.log_count_label.setObjectName("flowFooter")
         footer.addWidget(self.log_count_label)
         footer.addStretch()
@@ -654,7 +658,10 @@ class ReportsPage(QScrollArea):
             if is_visible:
                 visible_count += 1
 
-        self.log_count_label.setText(f"Hiển thị {visible_count} / {len(LOGS_DATA)} nhật ký")
+        self.log_count_label.setText(
+            f"Hiển thị {visible_count} / {len(LOGS_DATA)} nhật ký"
+            if LOGS_DATA else "Chưa có nhật ký hệ thống"
+        )
         self.logs_table.setFixedHeight(min(260, max(110, 38 + visible_count * 32)))
         self._update_log_pages(visible_count)
 
@@ -664,16 +671,27 @@ class ReportsPage(QScrollArea):
         self.log_category.setCurrentIndex(0)
         for r in range(len(LOGS_DATA)):
             self.logs_table.setRowHidden(r, False)
-        self.log_count_label.setText(f"Hiển thị 1–{len(LOGS_DATA)} / {len(LOGS_DATA)} nhật ký")
-        self.logs_table.setFixedHeight(260)
+        self.log_count_label.setText(
+            f"Hiển thị 1–{len(LOGS_DATA)} / {len(LOGS_DATA)} nhật ký"
+            if LOGS_DATA else "Chưa có nhật ký hệ thống"
+        )
+        self.logs_table.setFixedHeight(260 if LOGS_DATA else 110)
         self._update_log_pages(len(LOGS_DATA))
 
     def create_report(self) -> None:
+        if not LOGS_DATA:
+            self.create_button.setText("Chưa có dữ liệu")
+            self.create_button.setEnabled(False)
+            QTimer.singleShot(1800, self._reset_create_button)
+            return
         self.create_button.setText("Đang khởi tạo báo cáo...")
         self.create_button.setEnabled(False)
         QTimer.singleShot(800, self._report_created)
 
     def _report_created(self) -> None:
         self.create_button.setText("✓ Tạo thành công!")
-        QTimer.singleShot(1800, lambda: self.create_button.setText("Tạo báo cáo"))
+        QTimer.singleShot(1800, self._reset_create_button)
+
+    def _reset_create_button(self) -> None:
+        self.create_button.setText("Tạo báo cáo")
         self.create_button.setEnabled(True)

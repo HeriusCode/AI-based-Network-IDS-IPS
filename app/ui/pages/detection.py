@@ -1,9 +1,11 @@
-"""AI anomaly-detection dashboard backed by explicit simulated data."""
+"""AI anomaly-detection dashboard without fabricated detection records."""
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -12,7 +14,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -33,41 +34,9 @@ from app.ui.pages.dashboard import (
 from app.ui.pages.monitoring import Chart, MetricCard, MonitorMetric, Panel, legend_chip
 
 
-DETECTIONS = [
-    ["#A1024", "24/04 14:32:11", "10.0.0.23", "192.168.1.10", "TCP", "DDoS Attack", "98.5%", "Cao", "Đang xử lý"],
-    ["#A1023", "24/04 14:30:45", "203.113.5.21", "192.168.1.10", "UDP", "Port Scan", "95.2%", "Cao", "Đang xử lý"],
-    ["#A1022", "24/04 14:28:17", "192.168.1.77", "1.1.1.1", "TCP", "Brute Force", "92.1%", "Trung bình", "Đã xác nhận"],
-    ["#A1021", "24/04 14:26:09", "10.0.0.56", "192.168.1.10", "ICMP", "Protocol Anomaly", "91.4%", "Trung bình", "Đang giám sát"],
-    ["#A1020", "24/04 14:23:33", "192.168.1.50", "8.8.8.8", "TCP", "SQL Injection", "97.6%", "Cao", "Đã xác nhận"],
-    ["#A1019", "24/04 14:21:05", "203.113.5.21", "192.168.1.10", "UDP", "DDoS Attack", "96.8%", "Cao", "Đang xử lý"],
-    ["#A1018", "24/04 14:19:27", "10.0.0.89", "192.168.1.20", "TCP", "Malware Traffic", "89.3%", "Thấp", "Đã xử lý"],
-    ["#A1017", "24/04 14:16:44", "192.168.1.100", "203.113.5.21", "TCP", "Port Scan", "94.5%", "Cao", "Đã xác nhận"],
-    ["#A1016", "24/04 14:14:23", "10.0.0.23", "192.168.1.10", "UDP", "Suspicious Traffic", "88.7%", "Trung bình", "Đang giám sát"],
-    ["#A1015", "24/04 14:12:11", "192.168.1.77", "8.8.8.8", "TCP", "Brute Force", "93.1%", "Cao", "Đã xác nhận"],
-]
-
-PORT_MAPPINGS = {
-    "#A1024": ("52341", "80"),
-    "#A1023": ("44120", "53"),
-    "#A1022": ("39124", "22"),
-    "#A1021": ("0", "0"),
-    "#A1020": ("49215", "443"),
-    "#A1019": ("55102", "80"),
-    "#A1018": ("38112", "445"),
-    "#A1017": ("41200", "8080"),
-    "#A1016": ("51923", "80"),
-    "#A1015": ("33451", "3389"),
-}
-
-ATTACK_DESCRIPTIONS = {
-    "DDoS Attack": "Phát hiện lưu lượng TCP/UDP tăng đột biến với số lượng lớn gói tin và kết nối trong thời gian cực ngắn, có dấu hiệu làm cạn kiệt tài nguyên mạng và gây nghẽn dịch vụ.",
-    "Port Scan": "Ghi nhận chuỗi yêu cầu kết nối liên tục đến hàng loạt cổng dịch vụ khác nhau trong dải IP mục tiêu nhằm dò quét cổng mở và lỗ hổng tiềm ẩn.",
-    "Brute Force": "Phát hiện hàng loạt nỗ lực xác thực thất bại liên tiếp nhắm vào dịch vụ quản trị (SSH/RDP/Web Auth) với tần suất cao bất thường.",
-    "SQL Injection": "Phát hiện payload chứa các ký tự đặc biệt và cấu trúc lệnh SQL độc hại trong gói tin HTTP request nhằm can thiệp cơ sở dữ liệu backend.",
-    "Protocol Anomaly": "Gói tin vi phạm tiêu chuẩn giao thức RFC hoặc chứa cờ điều khiển bất thường (SYN-FIN, NULL scan) nhằm né tránh các bộ lọc an ninh.",
-    "Malware Traffic": "Phát hiện lưu lượng kết nối định kỳ đến địa chỉ IP C2 (Command & Control) hoặc mẫu lưu lượng phát tán mã độc đã nhận diện.",
-    "Suspicious Traffic": "Lưu lượng truyền tải dung lượng lớn ngoài khung giờ hoạt động tiêu chuẩn hoặc sai lệch đáng kể so với baseline học máy.",
-}
+DETECTIONS: list[list[str]] = []
+PORT_MAPPINGS: dict[str, tuple[str, str]] = {}
+ATTACK_DESCRIPTIONS: dict[str, str] = {}
 
 
 class DetectionPage(QScrollArea):
@@ -96,7 +65,7 @@ class DetectionPage(QScrollArea):
         heading.setStyleSheet("color: #FFFFFF; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;")
         intro.addWidget(heading)
 
-        subtitle = QLabel("Ứng dụng AI/Machine Learning để phát hiện các hành vi bất thường trong lưu lượng mạng  •  Dữ liệu mô phỏng")
+        subtitle = QLabel("Kết quả từ mô hình AI/Machine Learning  •  Không sử dụng dữ liệu cảnh báo giả lập")
         subtitle.setObjectName("detectionSubtitle")
         subtitle.setStyleSheet("color: #8E8BA7; font-size: 11.5px; font-weight: 400;")
         intro.addWidget(subtitle)
@@ -105,7 +74,7 @@ class DetectionPage(QScrollArea):
         controls = QHBoxLayout()
         controls.setSpacing(8)
 
-        ai_badge = QLabel("●  AI ENGINE ACTIVE")
+        ai_badge = QLabel("●  CHƯA CÓ KẾT QUẢ AI")
         ai_badge.setObjectName("liveBadge")
         ai_badge.setStyleSheet(
             "color: #10B981; background: rgba(16, 185, 129, 0.12); "
@@ -114,7 +83,8 @@ class DetectionPage(QScrollArea):
         )
         controls.addWidget(ai_badge)
 
-        self.date_button = QPushButton("  24/04/2025 00:00   →   24/04/2025 23:59  ˅")
+        today = datetime.now().strftime("%d/%m/%Y")
+        self.date_button = QPushButton(f"  {today} 00:00   →   {today} 23:59  ˅")
         self.date_button.setObjectName("dateRangeButton")
         self.date_button.setIcon(icon("calendar", "#AFC7E4", 14))
         self.date_button.setFixedHeight(36)
@@ -135,14 +105,17 @@ class DetectionPage(QScrollArea):
         metrics.setHorizontalSpacing(10)
         metrics.setVerticalSpacing(10)
         metric_data = [
-            MonitorMetric("Tổng phát hiện", "27", "↑ 22.7%", "#FF5B79", "warning"),
-            MonitorMetric("Lưu lượng bình thường", "1,221", "↑ 5.3%", "#10B981", "shield"),
-            MonitorMetric("Lưu lượng bất thường", "27", "↑ 22.7%", "#FF5B79", "bug"),
-            MonitorMetric("Độ tin cậy TB", "92.3%", "↑ 2.1%", "#A78BFA", "brain"),
-            MonitorMetric("Cảnh báo mức cao", "8", "↑ 33.3%", "#FBBF24", "siren"),
+            MonitorMetric("Tổng phát hiện", "0", "Chưa có", "#FF5B79", "warning"),
+            MonitorMetric("Lưu lượng bình thường", "0", "Chưa có", "#10B981", "shield"),
+            MonitorMetric("Lưu lượng bất thường", "0", "Chưa có", "#FF5B79", "bug"),
+            MonitorMetric("Độ tin cậy TB", "—", "Chưa có", "#A78BFA", "brain"),
+            MonitorMetric("Cảnh báo mức cao", "0", "Chưa có", "#FBBF24", "siren"),
         ]
+        self.metric_cards: list[MetricCard] = []
         for column, data in enumerate(metric_data):
-            metrics.addWidget(MetricCard(data), 0, column)
+            card = MetricCard(data)
+            self.metric_cards.append(card)
+            metrics.addWidget(card, 0, column)
             metrics.setColumnStretch(column, 1)
         root.addLayout(metrics)
 
@@ -170,11 +143,11 @@ class DetectionPage(QScrollArea):
             "Biến động lưu lượng bình thường và các điểm xâm nhập bất thường theo mốc giờ",
             trend_extra,
         )
-        normal = [2, 3, 2, 4, 3, 4, 2, 3, 5, 4, 6, 5, 4, 6, 5, 7, 4, 5, 7, 4, 6, 5, 8, 6, 7, 5, 8, 6, 9, 7, 8, 5]
-        anomaly = [1, 3, 2, 5, 2, 6, 3, 10, 4, 9, 3, 7, 13, 6, 5, 11, 19, 7, 5, 4, 3, 5, 2, 4, 3, 5, 2, 7, 3, 6, 4, 7]
+        normal = [0.0] * 32
+        anomaly = [0.0] * 32
         self.trend_chart = Chart(
             [(normal, "#60A5FA"), (anomaly, "#FF5B79")],
-            25,
+            1,
             ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "24:00"],
         )
         self.trend_chart.setFixedHeight(300)
@@ -182,7 +155,8 @@ class DetectionPage(QScrollArea):
         middle.addWidget(trend_panel, 0, 0)
 
         # 3.2 Phân loại loại tấn công (Attack breakdown)
-        attack_badge = QLabel("6 Loại")
+        self.attack_badge = QLabel("0 loại")
+        attack_badge = self.attack_badge
         attack_badge.setObjectName("panelChip")
         attack_badge.setStyleSheet(
             "color: #FF5B79; background: rgba(255, 91, 121, 0.15); "
@@ -191,35 +165,22 @@ class DetectionPage(QScrollArea):
         attack_panel = Panel("Phân loại loại tấn công", "Tỷ trọng các mối đe dọa được nhận diện", attack_badge)
         attack_body = QHBoxLayout()
         attack_body.setSpacing(12)
-        attack_body.addWidget(
-            DonutChart(
-                [
-                    (37.0, "#FF5B79"),
-                    (22.2, "#FB923C"),
-                    (14.8, "#60A5FA"),
-                    (11.1, "#C084FC"),
-                    (7.4, "#FACC15"),
-                    (7.4, "#10B981"),
-                ],
-                "Tổng",
-                "27",
-                "phát hiện",
-            ),
-            1,
-        )
+        self.attack_donut = DonutChart([], "Tổng", "0", "phát hiện")
+        attack_body.addWidget(self.attack_donut, 1)
 
         attack_legend = QVBoxLayout()
         attack_legend.setSpacing(3)
-        for color, name, value, percent in [
-            ("#FF5B79", "DDoS", "37.0%", 37.0),
-            ("#FB923C", "Port Scan", "22.2%", 22.2),
-            ("#60A5FA", "Brute Force", "14.8%", 14.8),
-            ("#C084FC", "SQL Injection", "11.1%", 11.1),
-            ("#FACC15", "Malware", "7.4%", 7.4),
-            ("#10B981", "Protocol", "7.4%", 7.4),
+        attack_legend.addStretch(1)
+        for color, name in [
+            ("#FF5B79", "DDoS"),
+            ("#FB923C", "Port Scan"),
+            ("#60A5FA", "Brute Force"),
+            ("#C084FC", "SQL Injection"),
+            ("#FACC15", "Malware"),
+            ("#10B981", "Protocol"),
         ]:
-            attack_legend.addWidget(protocol_bar_row(color, name, value, percent))
-        attack_legend.addStretch()
+            attack_legend.addWidget(protocol_bar_row(color, name, "0.0%", 0.0))
+        attack_legend.addStretch(1)
         attack_body.addLayout(attack_legend, 1)
         attack_panel.box.addLayout(attack_body, 1)
         middle.addWidget(attack_panel, 0, 1)
@@ -235,7 +196,7 @@ class DetectionPage(QScrollArea):
         self.detail_panel = self._detail_panel()
         self.detail_panel.setFixedWidth(330)
         bottom.addWidget(self.detail_panel, 0, 1)
-        self.update_detail(0)
+        self.show_empty_detail()
 
         bottom.setColumnStretch(0, 1)
         bottom.setColumnStretch(1, 0)
@@ -244,7 +205,8 @@ class DetectionPage(QScrollArea):
         self.setWidget(content)
 
     def _detections_panel(self) -> Panel:
-        badge = QLabel("27 Phát hiện")
+        self.detection_badge = QLabel("0 phát hiện")
+        badge = self.detection_badge
         badge.setObjectName("panelChip")
         badge.setStyleSheet(
             "color: #C4B5FD; background: rgba(139, 92, 246, 0.15); "
@@ -360,7 +322,7 @@ class DetectionPage(QScrollArea):
 
         self.table.setColumnWidth(0, 60)   # ID
         self.table.setColumnWidth(1, 95)   # Thời gian
-        self.table.setColumnWidth(2, 115)  # IP nguồn (chuẩn không bị che 192.168.1.100)
+        self.table.setColumnWidth(2, 115)  # IP nguồn
         self.table.setColumnWidth(3, 115)  # IP đích
         self.table.setColumnWidth(4, 65)   # Giao thức
         # Col 5 = Stretch (Loại bất thường)
@@ -435,20 +397,22 @@ class DetectionPage(QScrollArea):
             # Col 9: Hành động
             self.table.setCellWidget(r, 9, make_text_cell("◉  ⋮", color="#8E8BA7", align_center=True))
 
-        self.table.selectRow(0)
+        if DETECTIONS:
+            self.table.selectRow(0)
         self.table.cellClicked.connect(lambda row, column: self.update_detail(row))
         panel.box.addWidget(self.table)
 
         # Pagination footer
         footer = QHBoxLayout()
         footer.setContentsMargins(4, 4, 4, 0)
-        count = QLabel("Hiển thị 1–10 / 27 kết quả")
+        self.result_count = QLabel("Chưa có kết quả phát hiện từ mô hình AI")
+        count = self.result_count
         count.setObjectName("flowFooter")
         count.setStyleSheet("color: #8E8BA7; font-size: 11px;")
         footer.addWidget(count)
         footer.addStretch()
 
-        for page in ("‹", "1", "2", "3", "›"):
+        for page in ("‹", "1", "›"):
             button = QPushButton(page)
             button.setObjectName("activePage" if page == "1" else "pageButton")
             button.setFixedSize(28, 28)
@@ -473,7 +437,7 @@ class DetectionPage(QScrollArea):
         panel.box.setSpacing(12)
 
         # 1. Alert Banner
-        self.detail_alert = QLabel("⚠  #A1024 - DDoS Attack")
+        self.detail_alert = QLabel("Chưa chọn phát hiện")
         self.detail_alert.setObjectName("detailAlert")
         self.detail_alert.setStyleSheet(
             "color: #FF5B79; background: rgba(255, 91, 121, 0.14); "
@@ -493,14 +457,14 @@ class DetectionPage(QScrollArea):
 
         self.detail_fields: dict[str, QLabel] = {}
         for key, label, value in [
-            ("time", "Thời gian", "24/04/2025 14:32:11"),
-            ("source", "IP nguồn", "10.0.0.23"),
-            ("destination", "IP đích", "192.168.1.10"),
-            ("protocol", "Giao thức", "TCP"),
-            ("source_port", "Cổng nguồn", "52341"),
-            ("destination_port", "Cổng đích", "80"),
-            ("risk", "Mức độ rủi ro", "Cao"),
-            ("status", "Trạng thái", "Đang xử lý"),
+            ("time", "Thời gian", "—"),
+            ("source", "IP nguồn", "—"),
+            ("destination", "IP đích", "—"),
+            ("protocol", "Giao thức", "—"),
+            ("source_port", "Cổng nguồn", "—"),
+            ("destination_port", "Cổng đích", "—"),
+            ("risk", "Mức độ rủi ro", "—"),
+            ("status", "Trạng thái", "—"),
         ]:
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
@@ -539,7 +503,7 @@ class DetectionPage(QScrollArea):
         conf_header.addWidget(conf_title)
         conf_header.addStretch()
 
-        self.conf_percent = QLabel("98.5%")
+        self.conf_percent = QLabel("—")
         self.conf_percent.setStyleSheet("color: #10B981; font-size: 14px; font-weight: 800;")
         conf_header.addWidget(self.conf_percent)
         conf_box.addLayout(conf_header)
@@ -547,7 +511,7 @@ class DetectionPage(QScrollArea):
         self.confidence = QProgressBar()
         self.confidence.setObjectName("confidenceBar")
         self.confidence.setRange(0, 1000)
-        self.confidence.setValue(985)
+        self.confidence.setValue(0)
         self.confidence.setTextVisible(False)
         self.confidence.setFixedHeight(9)
         self.confidence.setStyleSheet("""
@@ -575,7 +539,7 @@ class DetectionPage(QScrollArea):
         desc_title.setStyleSheet("color: #C4B5FD; font-size: 12.5px; font-weight: 700;")
         desc_lay.addWidget(desc_title)
 
-        self.description = QLabel(ATTACK_DESCRIPTIONS["DDoS Attack"])
+        self.description = QLabel("Chưa có dữ liệu phân tích từ mô hình AI.")
         self.description.setStyleSheet("color: #D6D2EC; font-size: 12px; line-height: 1.5;")
         self.description.setWordWrap(True)
         desc_lay.addWidget(self.description)
@@ -610,6 +574,7 @@ class DetectionPage(QScrollArea):
             }
         """)
         self.block_button.clicked.connect(self.simulate_block)
+        self.block_button.setEnabled(False)
         actions.addWidget(self.block_button)
 
         details = QPushButton("  Xem chi tiết")
@@ -637,10 +602,13 @@ class DetectionPage(QScrollArea):
         return panel
 
     def update_detail(self, row: int) -> None:
+        if row < 0 or row >= len(DETECTIONS):
+            self.show_empty_detail()
+            return
         item = DETECTIONS[row]
         attack_type = item[5]
         self.detail_alert.setText(f"⚠  {item[0]} - {attack_type}")
-        self.detail_fields["time"].setText("24/04/2025 " + item[1].split(" ")[1])
+        self.detail_fields["time"].setText(item[1])
         self.detail_fields["source"].setText(item[2])
         self.detail_fields["destination"].setText(item[3])
 
@@ -652,7 +620,7 @@ class DetectionPage(QScrollArea):
         p_bd = "rgba(47, 155, 255, 0.3)" if proto == "TCP" else "rgba(255, 155, 55, 0.3)" if proto == "UDP" else "rgba(149, 81, 232, 0.3)"
         self.detail_fields["protocol"].setStyleSheet(f"color: {p_color}; background: {p_bg}; border: 1px solid {p_bd}; border-radius: 5px; padding: 2px 8px; font-size: 11.5px; font-weight: 700;")
 
-        s_port, d_port = PORT_MAPPINGS.get(item[0], ("52341", "80"))
+        s_port, d_port = PORT_MAPPINGS.get(item[0], ("—", "—"))
         self.detail_fields["source_port"].setText(s_port)
         self.detail_fields["destination_port"].setText(d_port)
 
@@ -677,14 +645,32 @@ class DetectionPage(QScrollArea):
         self.confidence.setValue(int(pct_val * 10))
 
         # Dynamic description
-        self.description.setText(ATTACK_DESCRIPTIONS.get(attack_type, ATTACK_DESCRIPTIONS["DDoS Attack"]))
+        self.description.setText(ATTACK_DESCRIPTIONS.get(attack_type, "Không có mô tả phân tích từ mô hình AI."))
 
         self.block_button.setText("  Chặn IP")
         self.block_button.setEnabled(True)
 
+    def show_empty_detail(self) -> None:
+        self.detail_alert.setText("Chưa có phát hiện bất thường")
+        for field in self.detail_fields.values():
+            field.setText("—")
+        self.conf_percent.setText("—")
+        self.confidence.setValue(0)
+        self.description.setText("Chưa có dữ liệu phân tích từ mô hình AI.")
+        self.block_button.setText("  Chặn IP")
+        self.block_button.setEnabled(False)
+
     def simulate_block(self) -> None:
-        self.block_button.setText("  Đã chặn (mô phỏng)")
+        self.block_button.setText("  Đã chặn")
         self.block_button.setEnabled(False)
 
     def refresh_data(self) -> None:
-        self.trend_chart.refresh()
+        # No detector/backend is connected yet. Keep the view honest and empty.
+        for card, value in zip(self.metric_cards, ("0", "0", "0", "—", "0")):
+            card.set_data(value, "Chưa có", 0.0)
+        self.trend_chart.update()
+        self.attack_donut.set_data([], "0", "phát hiện")
+        self.attack_badge.setText("0 loại")
+        self.detection_badge.setText("0 phát hiện")
+        self.result_count.setText("Chưa có kết quả phát hiện từ mô hình AI")
+        self.show_empty_detail()

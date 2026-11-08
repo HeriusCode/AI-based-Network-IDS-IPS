@@ -483,15 +483,22 @@ class SettingsPage(QScrollArea):
             row = QWidget()
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 2, 0, 2)
+            rl.setSpacing(12)
             nl = QLabel(name)
             nl.setObjectName("settingsLabel")
             rl.addWidget(nl)
             rl.addStretch()
             sl = QLabel(status_txt)
+            accent = QColor(color)
+            red, green, blue = accent.red(), accent.green(), accent.blue()
             sl.setStyleSheet(
-                f"color: {color}; background: {color}1A; border: 1px solid {color}4D; "
+                f"color: {color}; "
+                f"background-color: rgba({red}, {green}, {blue}, 30); "
+                f"border: 1px solid rgba({red}, {green}, {blue}, 90); "
                 "border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 700;"
             )
+            sl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            sl.setMinimumWidth(190)
             rl.addWidget(sl)
             return row
 

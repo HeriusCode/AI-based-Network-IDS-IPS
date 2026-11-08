@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import math
+import socket
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPalette
 from PySide6.QtWidgets import (
     QComboBox,
@@ -23,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.icons import icon
+from app.services.network_metrics import NetworkMetricsCollector, NetworkSnapshot
 from app.ui.pages.dashboard import make_badge_cell, make_text_cell
 from app.ui.pages.monitoring import Chart, MetricCard, MonitorMetric, Panel, legend_chip
 
@@ -40,203 +44,107 @@ class Device:
     color: str
     x: float
     y: float
-    mac: str = "00:00:00:00:00:01"
-    openflow: str = "1.3"
-    ports: str = "4"
-    flows: str = "1,245"
-    incoming: str = "125.4 Mbps"
-    outgoing: str = "118.2 Mbps"
-    uptime: str = "2 ngày 5 giờ"
-    status: str = "Trực tuyến"
+    mac: str = "—"
+    openflow: str = "Không áp dụng"
+    ports: str = "—"
+    flows: str = "—"
+    incoming: str = "0.00 Mbps"
+    outgoing: str = "0.00 Mbps"
+    uptime: str = "—"
+    status: str = "Không xác định"
 
 
-DEVICES: list[Device] = [
-    Device(
-        key="controller",
-        name="SDN Controller",
-        ip="192.168.1.10",
-        kind="Controller (Ryu / ONOS)",
-        icon_name="server",
-        color="#8B5CF6",
-        x=500,
-        y=65,
-        mac="00:00:00:00:00:10",
-        openflow="1.3 (Master)",
-        ports="3 Cổng",
-        flows="5 Flow Rules",
-        incoming="1.2 Mbps",
-        outgoing="1.1 Mbps",
-        uptime="5 ngày 12 giờ",
-    ),
-    Device(
-        key="switch",
-        name="s1 - Open vSwitch",
-        ip="192.168.1.1",
-        kind="Switch (Open vSwitch)",
-        icon_name="switch",
-        color="#3B82F6",
-        x=500,
-        y=245,
-        mac="00:00:00:00:00:01",
-        openflow="1.3 (OVS 2.17)",
-        ports="4 Cổng Gigabit",
-        flows="1,245 flows",
-        incoming="125.4 Mbps",
-        outgoing="118.2 Mbps",
-        uptime="2 ngày 5 giờ",
-    ),
-    Device(
-        key="client",
-        name="h1 - Normal Client",
-        ip="192.168.1.100",
-        kind="Host (Client Workstation)",
-        icon_name="monitor",
-        color="#10B981",
-        x=145,
-        y=245,
-        mac="00:00:00:00:00:02",
-        openflow="N/A (Standard IP)",
-        ports="1 Cổng",
-        flows="245 flows",
-        incoming="12.5 Mbps",
-        outgoing="1.3 Mbps",
-        uptime="1 ngày 8 giờ",
-    ),
-    Device(
-        key="server",
-        name="h3 - Target Server",
-        ip="192.168.1.200",
-        kind="Host (Web / Database)",
-        icon_name="server",
-        color="#6366F1",
-        x=855,
-        y=245,
-        mac="00:00:00:00:00:03",
-        openflow="N/A (Standard IP)",
-        ports="2 Cổng",
-        flows="521 flows",
-        incoming="45.2 Mbps",
-        outgoing="82.1 Mbps",
-        uptime="7 ngày 3 giờ",
-    ),
-    Device(
-        key="generator",
-        name="h2 - Traffic Generator",
-        ip="192.168.1.150",
-        kind="Host (Trex / Scapy Bot)",
-        icon_name="monitor",
-        color="#FF5B79",
-        x=500,
-        y=425,
-        mac="00:00:00:00:00:04",
-        openflow="N/A (Standard IP)",
-        ports="2 Cổng",
-        flows="632 flows",
-        incoming="78.6 Mbps",
-        outgoing="5.4 Mbps",
-        uptime="0 ngày 4 giờ",
-    ),
-    Device(
-        key="firewall",
-        name="Firewall (IPS Gateway)",
-        ip="192.168.1.254",
-        kind="Firewall (Suricata / IPTables)",
-        icon_name="firewall",
-        color="#F59E0B",
-        x=275,
-        y=395,
-        mac="00:00:00:00:00:FE",
-        openflow="Bypass / In-line",
-        ports="4 Cổng",
-        flows="324 flows",
-        incoming="32.1 Mbps",
-        outgoing="28.4 Mbps",
-        uptime="14 ngày 2 giờ",
-    ),
-    Device(
-        key="internet",
-        name="Internet Gateway",
-        ip="0.0.0.0/0",
-        kind="Cloud (WAN Uplink)",
-        icon_name="cloud",
-        color="#38BDF8",
-        x=65,
-        y=410,
-        mac="00:00:00:00:00:FF",
-        openflow="BGP / OSPF",
-        ports="1 Cổng WAN",
-        flows="156 flows",
-        incoming="5.3 Mbps",
-        outgoing="4.8 Mbps",
-        uptime="30 ngày 0 giờ",
-    ),
-]
+DEVICES: list[Device] = []
 
-DEVICE_TRAFFIC_SERIES: dict[str, tuple[list[tuple[list[int], str]], int, str, str]] = {
-    "switch": (
-        [
-            ([98, 119, 151, 134, 166, 188, 163, 132, 147, 159, 171, 152, 183, 207, 161, 133, 155, 178, 169, 197, 189, 252, 196, 156, 179, 185, 197, 166, 148, 176, 142, 161], "#3B82F6"),
-            ([67, 88, 112, 97, 126, 135, 118, 104, 119, 127, 131, 114, 126, 112, 106, 96, 111, 102, 115, 101, 90, 151, 119, 96, 110, 123, 115, 98, 104, 121, 95, 116], "#10B981"),
-        ],
-        300,
-        "125.4 Mbps",
-        "118.2 Mbps",
-    ),
-    "controller": (
-        [
-            ([1, 2, 1, 3, 2, 1, 2, 3, 2, 1, 2, 3, 2, 1, 2, 1, 2, 3, 2, 1, 2, 3, 2, 1, 2, 3, 2, 1, 2, 3, 2, 1], "#8B5CF6"),
-            ([1, 1, 2, 1, 2, 1, 1, 2, 1, 2, 1, 1, 2, 1, 2, 1, 1, 2, 1, 2, 1, 1, 2, 1, 2, 1, 1, 2, 1, 2, 1, 1], "#10B981"),
-        ],
-        10,
-        "1.2 Mbps",
-        "1.1 Mbps",
-    ),
-    "client": (
-        [
-            ([11, 13, 12, 15, 14, 12, 13, 16, 14, 13, 15, 12, 14, 17, 13, 12, 14, 15, 13, 16, 14, 18, 15, 13, 14, 16, 13, 12, 15, 14, 13, 13], "#3B82F6"),
-            ([1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 1], "#10B981"),
-        ],
-        30,
-        "12.5 Mbps",
-        "1.3 Mbps",
-    ),
-    "server": (
-        [
-            ([35, 42, 38, 48, 52, 44, 46, 50, 43, 47, 51, 46, 49, 55, 42, 45, 48, 52, 47, 56, 49, 62, 53, 44, 48, 50, 46, 43, 49, 47, 44, 45], "#3B82F6"),
-            ([68, 75, 72, 85, 91, 79, 82, 88, 80, 84, 89, 81, 86, 95, 78, 83, 87, 92, 85, 98, 89, 110, 93, 82, 86, 90, 84, 80, 88, 85, 81, 82], "#10B981"),
-        ],
-        150,
-        "45.2 Mbps",
-        "82.1 Mbps",
-    ),
-    "generator": (
-        [
-            ([65, 72, 70, 78, 82, 74, 76, 81, 75, 79, 83, 76, 80, 88, 73, 77, 81, 85, 79, 90, 82, 98, 85, 76, 80, 84, 78, 74, 82, 79, 75, 79], "#FF5B79"),
-            ([4, 5, 4, 6, 5, 4, 5, 6, 5, 4, 5, 6, 5, 4, 5, 4, 5, 6, 5, 4, 5, 6, 5, 4, 5, 6, 5, 4, 5, 6, 5, 5], "#10B981"),
-        ],
-        120,
-        "78.6 Mbps",
-        "5.4 Mbps",
-    ),
-    "firewall": (
-        [
-            ([25, 29, 28, 33, 36, 31, 32, 35, 30, 34, 37, 32, 35, 40, 29, 33, 35, 38, 33, 41, 35, 46, 38, 32, 35, 37, 33, 31, 36, 34, 31, 32], "#F59E0B"),
-            ([22, 26, 25, 30, 32, 28, 29, 31, 27, 30, 33, 29, 31, 35, 26, 29, 31, 34, 30, 36, 31, 40, 34, 28, 31, 33, 29, 27, 32, 30, 27, 28], "#10B981"),
-        ],
-        60,
-        "32.1 Mbps",
-        "28.4 Mbps",
-    ),
-    "internet": (
-        [
-            ([4, 5, 4, 6, 5, 4, 5, 6, 5, 4, 5, 6, 5, 4, 5, 4, 5, 6, 5, 4, 5, 6, 5, 4, 5, 6, 5, 4, 5, 6, 5, 5], "#38BDF8"),
-            ([4, 4, 5, 4, 5, 4, 4, 5, 4, 5, 4, 4, 5, 4, 5, 4, 4, 5, 4, 5, 4, 4, 5, 4, 5, 4, 4, 5, 4, 5, 4, 5], "#10B981"),
-        ],
-        15,
-        "5.3 Mbps",
-        "4.8 Mbps",
-    ),
-}
+DEVICE_TRAFFIC_SERIES: dict[str, tuple[list[tuple[list[float], str]], int, str, str]] = {}
+
+TOPOLOGY_LINKS: list[tuple[str, str, str, Qt.PenStyle, str, float]] = []
+
+
+def _load_operating_system_topology(snapshot: NetworkSnapshot) -> None:
+    """Replace all demo topology data with interfaces reported by the OS."""
+    global DEVICES, DEVICE_TRAFFIC_SERIES, TOPOLOGY_LINKS
+
+    previous_traffic = DEVICE_TRAFFIC_SERIES
+    interfaces = list(snapshot.interfaces)
+    primary_ip = next((item.ip for item in interfaces if item.ip not in ("—", "127.0.0.1")), "—")
+    total_in = snapshot.incoming_mbps
+    total_out = snapshot.outgoing_mbps
+    devices = [
+        Device(
+            key="local-host",
+            name=socket.gethostname() or "Máy cục bộ",
+            ip=primary_ip,
+            kind="Máy cục bộ",
+            icon_name="monitor",
+            color="#8B5CF6",
+            x=470,
+            y=250,
+            flows=f"{snapshot.active_connections:,} kết nối",
+            incoming=f"{total_in:.2f} Mbps",
+            outgoing=f"{total_out:.2f} Mbps",
+            status="Trực tuyến" if snapshot.available else "Không có dữ liệu",
+        )
+    ]
+
+    colors = ("#3B82F6", "#10B981", "#F59E0B", "#38BDF8", "#FF5B79", "#6366F1", "#14B8A6", "#A78BFA")
+    links: list[tuple[str, str, str, Qt.PenStyle, str, float]] = []
+    traffic: dict[str, tuple[list[tuple[list[int], str]], int, str, str]] = {}
+    count = max(1, len(interfaces))
+    for index, interface in enumerate(interfaces):
+        angle = -math.pi / 2 + 2 * math.pi * index / count
+        key = f"interface-{index}"
+        color = colors[index % len(colors)]
+        incoming = f"{interface.incoming_mbps:.2f} Mbps"
+        outgoing = f"{interface.outgoing_mbps:.2f} Mbps"
+        devices.append(
+            Device(
+                key=key,
+                name=interface.name,
+                ip=interface.ip,
+                kind="Giao diện mạng hệ điều hành",
+                icon_name="switch",
+                color=color,
+                x=470 + 330 * math.cos(angle),
+                y=250 + 180 * math.sin(angle),
+                mac=interface.mac,
+                incoming=incoming,
+                outgoing=outgoing,
+                status="Trực tuyến" if interface.is_up else "Ngoại tuyến",
+            )
+        )
+        links.append(
+            (
+                "local-host", key, color, Qt.PenStyle.SolidLine,
+                f"Vào {incoming}\nRa {outgoing}", 2.0,
+            )
+        )
+        previous_series = previous_traffic.get(key, ([([0.0] * 32, "#3B82F6"), ([0.0] * 32, "#10B981")], 1, "", ""))[0]
+        previous_series[0][0].append(interface.incoming_mbps)
+        del previous_series[0][0][0]
+        previous_series[1][0].append(interface.outgoing_mbps)
+        del previous_series[1][0][0]
+        traffic[key] = (
+            previous_series,
+            max(1, int(max(max(previous_series[0][0]), max(previous_series[1][0])) * 1.25)),
+            incoming,
+            outgoing,
+        )
+
+    host_series = previous_traffic.get("local-host", ([([0.0] * 32, "#3B82F6"), ([0.0] * 32, "#10B981")], 1, "", ""))[0]
+    host_series[0][0].append(total_in)
+    del host_series[0][0][0]
+    host_series[1][0].append(total_out)
+    del host_series[1][0][0]
+    traffic["local-host"] = (
+        host_series,
+        max(1, int(max(max(host_series[0][0]), max(host_series[1][0])) * 1.25)),
+        f"{total_in:.2f} Mbps",
+        f"{total_out:.2f} Mbps",
+    )
+    DEVICES = devices
+    TOPOLOGY_LINKS = links
+    DEVICE_TRAFFIC_SERIES = traffic
 
 
 class TopologyCanvas(QWidget):
@@ -248,29 +156,56 @@ class TopologyCanvas(QWidget):
         self.setMinimumHeight(440)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.zoom = 1.0
-        self.selected = "switch"
+        self.pan = QPointF(0.0, 0.0)
+        self.selected = ""
         self._node_rects: dict[str, QRectF] = {}
+        self._drag_origin: QPointF | None = None
+        self._pan_origin = QPointF(0.0, 0.0)
+        self._dragging = False
         self.setMouseTracking(True)
 
     def zoom_in(self) -> None:
-        self.zoom = min(1.35, self.zoom + 0.1)
+        self._set_zoom(self.zoom * 1.15, QPointF(self.width() / 2, self.height() / 2))
         self.update()
 
     def zoom_out(self) -> None:
-        self.zoom = max(0.75, self.zoom - 0.1)
+        self._set_zoom(self.zoom / 1.15, QPointF(self.width() / 2, self.height() / 2))
         self.update()
 
     def reset_layout(self) -> None:
         self.zoom = 1.0
+        self.pan = QPointF(0.0, 0.0)
         self.update()
 
+    def _set_zoom(self, value: float, anchor: QPointF) -> None:
+        old_zoom = self.zoom
+        new_zoom = max(0.45, min(2.5, value))
+        if abs(new_zoom - old_zoom) < 0.0001:
+            return
+        center = QPointF(self.width() / 2, self.height() / 2)
+        relative = anchor - center - self.pan
+        self.pan = anchor - center - relative * (new_zoom / old_zoom)
+        self.zoom = new_zoom
+
+    def wheelEvent(self, event) -> None:
+        factor = 1.12 if event.angleDelta().y() > 0 else 1 / 1.12
+        self._set_zoom(self.zoom * factor, event.position())
+        self.update()
+        event.accept()
+
     def mouseMoveEvent(self, event) -> None:
+        if self._dragging and self._drag_origin is not None:
+            self.pan = self._pan_origin + event.position() - self._drag_origin
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.update()
+            event.accept()
+            return
         pos = event.position()
         hovered = any(rect.contains(pos) for rect in self._node_rects.values())
         if hovered:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
         else:
-            self.unsetCursor()
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event) -> None:
@@ -283,7 +218,22 @@ class TopologyCanvas(QWidget):
                     self.update()
                     event.accept()
                     return
+            self._drag_origin = event.position()
+            self._pan_origin = QPointF(self.pan)
+            self._dragging = True
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._dragging:
+            self._dragging = False
+            self._drag_origin = None
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, event) -> None:
         del event
@@ -301,8 +251,8 @@ class TopologyCanvas(QWidget):
 
         # 2. Scale & Center projection
         scale = min(self.width() / 940, self.height() / 500) * self.zoom
-        offset_x = (self.width() - 940 * scale) / 2
-        offset_y = (self.height() - 500 * scale) / 2
+        offset_x = (self.width() - 940 * scale) / 2 + self.pan.x()
+        offset_y = (self.height() - 500 * scale) / 2 + self.pan.y()
 
         def point(x: float, y: float) -> QPointF:
             return QPointF(offset_x + x * scale, offset_y + y * scale)
@@ -310,16 +260,9 @@ class TopologyCanvas(QWidget):
         positions = {device.key: point(device.x, device.y) for device in DEVICES}
 
         # 3. Network Links
-        links = [
-            ("controller", "switch", "#8B5CF6", Qt.PenStyle.DashLine, "OpenFlow 1.3\nControl Channel", 2.6),
-            ("client", "switch", "#10B981", Qt.PenStyle.SolidLine, "12.5 Mbps\n1,245 p/s", 2.2),
-            ("switch", "server", "#6366F1", Qt.PenStyle.SolidLine, "45.2 Mbps\n4,521 p/s", 2.2),
-            ("switch", "generator", "#FF5B79", Qt.PenStyle.SolidLine, "78.6 Mbps\n8,920 p/s", 2.6),
-            ("internet", "firewall", "#38BDF8", Qt.PenStyle.SolidLine, "5.3 Mbps\n523 p/s", 2.0),
-            ("firewall", "switch", "#F59E0B", Qt.PenStyle.SolidLine, "32.1 Mbps\n3,245 p/s", 2.2),
-        ]
-
-        for source, target, color_str, style, text, thickness in links:
+        for source, target, color_str, style, text, thickness in TOPOLOGY_LINKS:
+            if source not in positions or target not in positions:
+                continue
             start, end = positions[source], positions[target]
 
             # Link outer glow
@@ -410,39 +353,28 @@ class TopologyCanvas(QWidget):
             )
 
             # Status
-            painter.setPen(QColor("#10B981"))
+            status_color = "#10B981" if device.status == "Trực tuyến" else "#FF5B79"
+            painter.setPen(QColor(status_color))
             st_font = QFont("Segoe UI", max(7, int(8 * scale)), QFont.Weight.DemiBold)
             painter.setFont(st_font)
             painter.drawText(
                 QRectF(text_x, rect.top() + 45 * scale, text_w, 16 * scale),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                "● Trực tuyến",
+                f"● {device.status}",
             )
 
-        # 5. Floating Semi-transparent Legend Box
-        legend_box = QRectF(14, 14, 230, 162)
+        # 5. Canvas interaction help.
+        legend_box = QRectF(14, 14, 250, 66)
         painter.setPen(QPen(QColor("#2E2760"), 1))
         painter.setBrush(QColor(19, 17, 43, 230))
         painter.drawRoundedRect(legend_box, 10, 10)
 
         painter.setPen(QColor("#C4B5FD"))
         painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
-        painter.drawText(QRectF(24, 22, 208, 16), "CHÚ THÍCH LIÊN KẾT MẠNG")
-
-        legend_items = [
-            ("#10B981", "Lưu lượng chuẩn (Normal LAN)", Qt.PenStyle.SolidLine),
-            ("#FF5B79", "Lưu lượng cao / Tấn công", Qt.PenStyle.SolidLine),
-            ("#8B5CF6", "Kênh điều khiển (OpenFlow)", Qt.PenStyle.DashLine),
-            ("#6366F1", "Truy cập máy chủ (Server Link)", Qt.PenStyle.SolidLine),
-            ("#38BDF8", "Đường truyền Internet / WAN", Qt.PenStyle.SolidLine),
-        ]
+        painter.drawText(QRectF(24, 22, 228, 16), "ĐIỀU KHIỂN SƠ ĐỒ")
+        painter.setPen(QColor("#CBD5E1"))
         painter.setFont(QFont("Segoe UI", 8))
-        for index, (col, lbl, sty) in enumerate(legend_items):
-            ly = 48 + index * 22
-            painter.setPen(QPen(QColor(col), 2.5, sty))
-            painter.drawLine(24, ly, 52, ly)
-            painter.setPen(QColor("#CBD5E1"))
-            painter.drawText(QRectF(60, ly - 9, 160, 18), lbl)
+        painter.drawText(QRectF(24, 42, 228, 18), "Kéo nền để di chuyển  •  Lăn chuột để zoom")
 
 
 class MiniMap(QWidget):
@@ -450,7 +382,7 @@ class MiniMap(QWidget):
         super().__init__(parent)
         self.setMinimumHeight(115)
         self.setFixedHeight(115)
-        self.selected = "switch"
+        self.selected = ""
 
     def paintEvent(self, event) -> None:
         del event
@@ -470,14 +402,9 @@ class MiniMap(QWidget):
         }
 
         # Links
-        for s, t, col in [
-            ("controller", "switch", "#8B5CF6"),
-            ("client", "switch", "#10B981"),
-            ("switch", "server", "#6366F1"),
-            ("switch", "generator", "#FF5B79"),
-            ("internet", "firewall", "#38BDF8"),
-            ("firewall", "switch", "#F59E0B"),
-        ]:
+        for s, t, col, _style, _text, _thickness in TOPOLOGY_LINKS:
+            if s not in points or t not in points:
+                continue
             painter.setPen(QPen(QColor(col), 1.2))
             painter.drawLine(points[s], points[t])
 
@@ -505,6 +432,9 @@ class TopologyPage(QScrollArea):
         self.setObjectName("topologyScroll")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
+        self.collector = NetworkMetricsCollector()
+        self._last_snapshot = self.collector.sample()
+        _load_operating_system_topology(self._last_snapshot)
 
         content = QWidget()
         content.setObjectName("topologyContent")
@@ -512,7 +442,7 @@ class TopologyPage(QScrollArea):
         root.setContentsMargins(16, 12, 16, 16)
         root.setSpacing(12)
 
-        self.selected_key = "switch"
+        self.selected_key = DEVICES[0].key if DEVICES else ""
 
         # ---------------------------------------------------------------------
         # 1. HEADER (Title, Subtitle & SOC Action Controls)
@@ -526,15 +456,14 @@ class TopologyPage(QScrollArea):
         intro.addWidget(heading)
 
         subtitle = QLabel(
-            "Trực quan hóa cấu trúc topology OpenFlow SDN, trạng thái kết nối thời gian thực và luồng dữ liệu an ninh mạng"
+            "Trực quan hóa máy cục bộ và các giao diện mạng do hệ điều hành phát hiện"
         )
         subtitle.setObjectName("topologySubtitle")
         subtitle.setWordWrap(True)
         intro.addWidget(subtitle)
         header.addLayout(intro, stretch=1)
 
-        # SDN Engine Active Badge
-        status_badge = QLabel("●  SDN OPENFLOW ACTIVE")
+        status_badge = QLabel("●  DỮ LIỆU HỆ ĐIỀU HÀNH")
         status_badge.setStyleSheet(
             "background: rgba(139, 92, 246, 0.14); color: #C4B5FD; "
             "border: 1px solid rgba(139, 92, 246, 0.35); border-radius: 10px; "
@@ -548,7 +477,7 @@ class TopologyPage(QScrollArea):
 
         self.mode_combo = QComboBox()
         self.mode_combo.setObjectName("topologyCombo")
-        self.mode_combo.addItems(["Topology Logic", "OpenFlow SDN", "Mô hình Vật lý"])
+        self.mode_combo.addItems(["Giao diện hệ điều hành"])
         header.addWidget(self.mode_combo)
 
         arrange = QPushButton("Tự động sắp xếp")
@@ -578,14 +507,17 @@ class TopologyPage(QScrollArea):
         metrics.setHorizontalSpacing(10)
         metrics.setVerticalSpacing(10)
         metric_data = [
-            MonitorMetric("Tổng số thiết bị", "7 Nodes", "100% Kết nối", "#3B82F6", "nodes"),
-            MonitorMetric("Thiết bị trực tuyến", "7 Online", "● 0 Ngoại tuyến", "#10B981", "check"),
-            MonitorMetric("Liên kết mạng (Links)", "6 Active", "OpenFlow 1.3", "#8B5CF6", "switch"),
-            MonitorMetric("Băng thông toàn mạng", "178.6 Mbps", "↑ 8.4%", "#FBBF24", "activity"),
-            MonitorMetric("Cảnh báo Topology", "0 Sự cố", "● Toàn vẹn", "#10B981", "shield"),
+            MonitorMetric("Tổng số nút", f"{len(DEVICES)}", "HĐH", "#3B82F6", "nodes"),
+            MonitorMetric("Giao diện trực tuyến", f"{sum(1 for item in self._last_snapshot.interfaces if item.is_up)}", "Live", "#10B981", "check"),
+            MonitorMetric("Liên kết mạng", f"{len(TOPOLOGY_LINKS)}", "Cục bộ", "#8B5CF6", "switch"),
+            MonitorMetric("Băng thông hiện tại", f"{self._last_snapshot.incoming_mbps + self._last_snapshot.outgoing_mbps:.2f} Mbps", "Live", "#FBBF24", "activity"),
+            MonitorMetric("Cảnh báo topology", "0", "Chưa có nguồn", "#10B981", "shield"),
         ]
+        self.metric_cards: list[MetricCard] = []
         for column, data in enumerate(metric_data):
-            metrics.addWidget(MetricCard(data), 0, column)
+            card = MetricCard(data)
+            self.metric_cards.append(card)
+            metrics.addWidget(card, 0, column)
             metrics.setColumnStretch(column, 1)
         root.addLayout(metrics)
 
@@ -621,8 +553,12 @@ class TopologyPage(QScrollArea):
 
         self.setWidget(content)
 
-        # Initialize default selection to Switch
-        self.select_device("switch", source="internal")
+        if DEVICES:
+            self.select_device(DEVICES[0].key, source="internal")
+
+        self.live_timer = QTimer(self)
+        self.live_timer.timeout.connect(self.refresh_topology_data)
+        self.live_timer.start(1800)
 
     # -------------------------------------------------------------------------
     # DEVICE INSPECTOR PANEL & MINIMAP
@@ -648,11 +584,11 @@ class TopologyPage(QScrollArea):
 
         name_box = QVBoxLayout()
         name_box.setSpacing(1)
-        self.detail_name = QLabel("s1 - Open vSwitch")
+        self.detail_name = QLabel("Chưa chọn thiết bị")
         self.detail_name.setObjectName("deviceDetailName")
         name_box.addWidget(self.detail_name)
 
-        self.detail_status = QLabel("●  Trực tuyến")
+        self.detail_status = QLabel("●  Chưa có dữ liệu")
         self.detail_status.setObjectName("deviceOnline")
         name_box.addWidget(self.detail_status)
         header_lay.addLayout(name_box, stretch=1)
@@ -668,15 +604,15 @@ class TopologyPage(QScrollArea):
         # Properties
         self.detail_values: dict[str, QLabel] = {}
         fields = [
-            ("kind", "Loại thiết bị", "Switch (Open vSwitch)"),
-            ("ip", "Địa chỉ IP", "192.168.1.1"),
-            ("mac", "Địa chỉ MAC", "00:00:00:00:00:01"),
-            ("openflow", "Giao thức SDN", "1.3 (OVS 2.17)"),
-            ("ports", "Số cổng mạng", "4 Cổng Gigabit"),
-            ("flows", "Số luồng (Flows)", "1,245 flows"),
-            ("incoming", "Lưu lượng vào", "125.4 Mbps"),
-            ("outgoing", "Lưu lượng ra", "118.2 Mbps"),
-            ("uptime", "Thời gian chạy", "2 ngày 5 giờ"),
+            ("kind", "Loại thiết bị", "—"),
+            ("ip", "Địa chỉ IP", "—"),
+            ("mac", "Địa chỉ MAC", "—"),
+            ("openflow", "Giao thức SDN", "—"),
+            ("ports", "Số cổng mạng", "—"),
+            ("flows", "Số kết nối", "—"),
+            ("incoming", "Lưu lượng vào", "0.00 Mbps"),
+            ("outgoing", "Lưu lượng ra", "0.00 Mbps"),
+            ("uptime", "Thời gian chạy", "—"),
         ]
 
         for key, label_text, value in fields:
@@ -731,7 +667,8 @@ class TopologyPage(QScrollArea):
         panel = Panel("Danh sách thiết bị trong mạng")
 
         # Badge counter in title
-        badge = QLabel("7 Thiết bị")
+        self.device_badge = QLabel(f"{len(DEVICES)} thiết bị")
+        badge = self.device_badge
         badge.setStyleSheet(
             "background: rgba(108, 93, 211, 0.15); color: #C4B5FD; "
             "border: 1px solid rgba(108, 93, 211, 0.35); border-radius: 8px; "
@@ -801,7 +738,10 @@ class TopologyPage(QScrollArea):
                 r,
                 3,
                 make_badge_cell(
-                    "● Trực tuyến", "rgba(16, 185, 129, 0.14)", "#10B981", "rgba(16, 185, 129, 0.35)"
+                    f"● {dev.status}",
+                    "rgba(16, 185, 129, 0.14)" if dev.status == "Trực tuyến" else "rgba(255, 91, 121, 0.14)",
+                    "#10B981" if dev.status == "Trực tuyến" else "#FF5B79",
+                    "rgba(16, 185, 129, 0.35)" if dev.status == "Trực tuyến" else "rgba(255, 91, 121, 0.35)",
                 ),
             )
             self.device_table.setCellWidget(r, 4, make_text_cell(dev.incoming, "#38BDF8", align_center=True))
@@ -834,13 +774,13 @@ class TopologyPage(QScrollArea):
         self.device_combo = QComboBox()
         self.device_combo.setObjectName("topologyCombo")
         self.device_combo.addItems([d.name for d in DEVICES])
-        self.device_combo.setCurrentIndex(1)  # switch
+        self.device_combo.setCurrentIndex(0 if DEVICES else -1)
         self.device_combo.currentIndexChanged.connect(self._on_combo_index_changed)
         top_bar.addWidget(self.device_combo)
 
         top_bar.addSpacing(10)
 
-        self.traffic_in_chip = QLabel("Vào: 125.4 Mbps")
+        self.traffic_in_chip = QLabel("Vào: 0.00 Mbps")
         self.traffic_in_chip.setStyleSheet(
             "background: rgba(59, 130, 246, 0.15); color: #60A5FA; "
             "border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; "
@@ -848,7 +788,7 @@ class TopologyPage(QScrollArea):
         )
         top_bar.addWidget(self.traffic_in_chip)
 
-        self.traffic_out_chip = QLabel("Ra: 118.2 Mbps")
+        self.traffic_out_chip = QLabel("Ra: 0.00 Mbps")
         self.traffic_out_chip.setStyleSheet(
             "background: rgba(16, 185, 129, 0.15); color: #34D399; "
             "border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; "
@@ -862,17 +802,83 @@ class TopologyPage(QScrollArea):
         panel.box.addLayout(top_bar)
 
         # Real-time traffic chart
-        default_series, default_max, _, _ = DEVICE_TRAFFIC_SERIES["switch"]
+        default_key = DEVICES[0].key if DEVICES else ""
+        default_series, default_max, _, _ = DEVICE_TRAFFIC_SERIES.get(
+            default_key,
+            ([([0.0] * 32, "#3B82F6"), ([0.0] * 32, "#10B981")], 1, "0.00 Mbps", "0.00 Mbps"),
+        )
+        now = datetime.now()
         self.traffic_chart = Chart(
             default_series,
             default_max,
-            ["14:25", "14:27", "14:29", "14:31", "14:33", "14:35"],
+            [(now - timedelta(minutes=2 * (5 - index))).strftime("%H:%M") for index in range(6)],
         )
         self.traffic_chart.setMinimumHeight(185)
         self.traffic_chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         panel.box.addWidget(self.traffic_chart)
 
         return panel
+
+    def refresh_topology_data(self) -> None:
+        snapshot = self.collector.sample()
+        self._last_snapshot = snapshot
+        selected_key = self.selected_key
+        _load_operating_system_topology(snapshot)
+
+        total_mbps = snapshot.incoming_mbps + snapshot.outgoing_mbps
+        values = (
+            (f"{len(DEVICES)}", "HĐH", len(DEVICES)),
+            (f"{sum(1 for item in snapshot.interfaces if item.is_up)}", "Live", len(snapshot.interfaces)),
+            (f"{len(TOPOLOGY_LINKS)}", "Cục bộ", len(TOPOLOGY_LINKS)),
+            (f"{total_mbps:.2f} Mbps", "Live", total_mbps),
+            ("0", "Chưa có nguồn", 0.0),
+        )
+        for card, (value, change, spark) in zip(self.metric_cards, values):
+            card.set_data(value, change, float(spark))
+
+        self.device_badge.setText(f"{len(DEVICES)} thiết bị")
+        self.device_table.blockSignals(True)
+        self.device_table.clearContents()
+        self.device_table.setRowCount(len(DEVICES))
+        for row, device in enumerate(DEVICES):
+            self.device_table.setRowHeight(row, 26)
+            self.device_table.setCellWidget(row, 0, make_text_cell(device.name, "#FFFFFF", is_bold=True))
+            self.device_table.setCellWidget(row, 1, make_text_cell(device.ip, "#C4B5FD", is_mono=True))
+            self.device_table.setCellWidget(row, 2, make_text_cell(device.kind.split(" ")[0], "#94A3B8"))
+            online = device.status == "Trực tuyến"
+            self.device_table.setCellWidget(
+                row, 3,
+                make_badge_cell(
+                    f"● {device.status}",
+                    "rgba(16, 185, 129, 0.14)" if online else "rgba(255, 91, 121, 0.14)",
+                    "#10B981" if online else "#FF5B79",
+                    "rgba(16, 185, 129, 0.35)" if online else "rgba(255, 91, 121, 0.35)",
+                ),
+            )
+            self.device_table.setCellWidget(row, 4, make_text_cell(device.incoming, "#38BDF8", align_center=True))
+            self.device_table.setCellWidget(row, 5, make_text_cell(device.outgoing, "#818CF8", align_center=True))
+            self.device_table.setCellWidget(row, 6, make_text_cell(device.flows, "#FBBF24", align_center=True))
+        self.device_table.blockSignals(False)
+
+        self.device_combo.blockSignals(True)
+        self.device_combo.clear()
+        self.device_combo.addItems([device.name for device in DEVICES])
+        self.device_combo.blockSignals(False)
+
+        if not any(device.key == selected_key for device in DEVICES):
+            selected_key = DEVICES[0].key if DEVICES else ""
+        self.selected_key = selected_key
+        self.canvas.selected = selected_key
+        self.canvas.update()
+        self.minimap.selected = selected_key
+        self.minimap.update()
+        if selected_key:
+            self.select_device(selected_key, source="internal")
+
+        now = datetime.now()
+        self.traffic_chart.labels = [
+            (now - timedelta(minutes=2 * (5 - index))).strftime("%H:%M") for index in range(6)
+        ]
 
     def _on_combo_index_changed(self, index: int) -> None:
         if 0 <= index < len(DEVICES):
@@ -924,7 +930,6 @@ class TopologyPage(QScrollArea):
             series_data, max_val, inc, outg = DEVICE_TRAFFIC_SERIES[key]
             self.traffic_chart.series = series_data
             self.traffic_chart.maximum = max_val
-            self.traffic_chart._baselines = [sum(vals) / max(1, len(vals)) for vals, _ in series_data]
             if hasattr(self, "traffic_in_chip"):
                 self.traffic_in_chip.setText(f"Vào: {inc}")
             if hasattr(self, "traffic_out_chip"):
@@ -938,6 +943,7 @@ class TopologyPage(QScrollArea):
 
         if hasattr(self, "detail_name"):
             self.detail_name.setText(device.name)
+            self.detail_status.setText(f"●  {device.status}")
             self.detail_values["kind"].setText(device.kind)
             self.detail_values["ip"].setText(device.ip)
             self.detail_values["mac"].setText(device.mac)

@@ -724,7 +724,8 @@ QTableCornerButton::section {
 }
 
 QComboBox#monitorCombo,
-QComboBox#flowCombo {
+QComboBox#flowCombo,
+QComboBox#trafficRangeCombo {
     background: #15132B;
     border: 1px solid #282452;
     border-radius: 12px;
@@ -735,6 +736,17 @@ QComboBox#flowCombo {
 
 QComboBox#monitorCombo {
     min-width: 130px;
+}
+
+QComboBox#trafficRangeCombo {
+    min-width: 130px;
+    padding-right: 28px;
+}
+
+QComboBox#trafficRangeCombo::down-arrow {
+    image: none;
+    width: 0;
+    height: 0;
 }
 
 QComboBox#flowCombo {

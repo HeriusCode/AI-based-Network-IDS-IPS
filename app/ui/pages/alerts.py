@@ -1,6 +1,8 @@
-"""Security alerts page with interactive triage, deep inspection, and simulated IPS response actions."""
+"""Security alerts page without fabricated IDS/IPS events."""
 
 from __future__ import annotations
+
+from datetime import datetime
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
@@ -29,114 +31,20 @@ from app.ui.pages.monitoring import Chart, MetricCard, MonitorMetric, Panel, leg
 legend = legend_chip
 
 
-ALERTS = [
-    ["#A1024", "24/04 14:32:11", "10.0.0.23", "192.168.1.10", "DDoS Attack", "Nghiêm trọng", "Lưu lượng TCP SYN tăng đột biến", "Đang xử lý"],
-    ["#A1023", "24/04 14:30:45", "203.113.5.21", "192.168.1.10", "Port Scan", "Cao", "Quét cổng hàng loạt TCP/UDP", "Chưa xử lý"],
-    ["#A1022", "24/04 14:28:17", "192.168.1.77", "1.1.1.1", "Brute Force", "Cao", "Đăng nhập SSH thất bại liên tục", "Đang xử lý"],
-    ["#A1021", "24/04 14:26:09", "10.0.0.56", "192.168.1.10", "SQL Injection", "Trung bình", "Phát hiện payload UNION SELECT SQL", "Đã xử lý"],
-    ["#A1020", "24/04 14:23:33", "192.168.1.50", "8.8.8.8", "Malware", "Cao", "Kết nối C2 domain mã độc botnet", "Chưa xử lý"],
-    ["#A1019", "24/04 14:21:05", "203.113.5.21", "192.168.1.10", "DDoS Attack", "Nghiêm trọng", "Lưu lượng UDP Flood bất thường", "Đang xử lý"],
-    ["#A1018", "24/04 14:19:27", "10.0.0.89", "192.168.1.20", "Port Scan", "Trung bình", "Dò quét cổng dịch vụ quản trị", "Đã xử lý"],
-    ["#A1017", "24/04 14:16:44", "192.168.1.100", "203.113.5.21", "Suspicious Traffic", "Thấp", "Truy cập URL bất thường ngoài ca trực", "Đã xử lý"],
-    ["#A1016", "24/04 14:14:23", "10.0.0.23", "192.168.1.10", "Brute Force", "Cao", "Nhiều lần thử mật khẩu FTP sai", "Chưa xử lý"],
-    ["#A1015", "24/04 14:12:11", "192.168.1.77", "8.8.8.8", "Protocol Anomaly", "Trung bình", "Gói tin ICMP có trường padding lạ", "Đã xử lý"],
-]
+ALERTS: list[list[str]] = []
 
-ALERT_DETAILS = [
-    {
-        "protocol": "TCP (SYN Flood)", "src_port": "52341", "dst_port": "80 (HTTP)",
-        "incoming": "125.4 Mbps", "outgoing": "118.2 Mbps", "packets": "1,245,536",
-        "duration": "2 phút 15 giây", "confidence": "98.5%",
-        "analysis": "Phát hiện lưu lượng TCP SYN tăng đột biến từ địa chỉ 10.0.0.23 đến 192.168.1.10. Tỷ lệ gói tin SYN/ACK bất thường, có dấu hiệu làm cạn kiệt tài nguyên backlog của máy chủ đích.",
-    },
-    {
-        "protocol": "TCP / UDP", "src_port": "44120", "dst_port": "1-1024",
-        "incoming": "3.2 Mbps", "outgoing": "0.4 Mbps", "packets": "18,450",
-        "duration": "1 phút 04 giây", "confidence": "94.2%",
-        "analysis": "Phát hiện quét cổng tốc độ cao từ IP ngoại mạng 203.113.5.21. Địa chỉ nguồn gửi liên tục các gói probe thăm dò cổng dịch vụ nhằm tìm kiếm lỗ hổng chưa vá.",
-    },
-    {
-        "protocol": "TCP (SSH)", "src_port": "51234", "dst_port": "22 (SSH)",
-        "incoming": "1.8 Mbps", "outgoing": "0.2 Mbps", "packets": "9,240",
-        "duration": "45 giây", "confidence": "92.1%",
-        "analysis": "Ghi nhận 142 lần xác thực thất bại liên tục trong vòng 45 giây từ IP 192.168.1.77 vào dịch vụ SSH. Mô hình phát hiện hành vi tấn công từ điển mật khẩu brute-force.",
-    },
-    {
-        "protocol": "TCP (HTTP)", "src_port": "49152", "dst_port": "80 (Web App)",
-        "incoming": "4.5 Mbps", "outgoing": "1.1 Mbps", "packets": "12,180",
-        "duration": "12 giây", "confidence": "97.6%",
-        "analysis": "Phát hiện chuỗi payload SQL Injection trong tham số GET/POST của yêu cầu HTTP. Mô hình Deep Learning nhận diện cấu trúc tấn công vượt qua bộ lọc WAF.",
-    },
-    {
-        "protocol": "DNS / UDP", "src_port": "53100", "dst_port": "53 (DNS)",
-        "incoming": "12.8 Mbps", "outgoing": "8.4 Mbps", "packets": "45,200",
-        "duration": "3 phút 40 giây", "confidence": "89.3%",
-        "analysis": "Máy trạm 192.168.1.50 phát sinh nhiều truy vấn DNS bất thường đến các máy chủ Command & Control (C2) đã bị liệt vào danh sách đen độc hại toàn cầu.",
-    },
-    {
-        "protocol": "UDP Flood", "src_port": "55432", "dst_port": "80 (HTTP)",
-        "incoming": "98.2 Mbps", "outgoing": "84.1 Mbps", "packets": "950,420",
-        "duration": "1 phút 50 giây", "confidence": "96.8%",
-        "analysis": "Đợt tấn công từ chối dịch vụ phân tán sử dụng giao thức UDP Flood. Lưu lượng ngập tràn cổng dịch vụ làm giảm chất lượng đường truyền mạng nội bộ.",
-    },
-    {
-        "protocol": "TCP (Syn-Ack)", "src_port": "42110", "dst_port": "21, 22, 80",
-        "incoming": "2.1 Mbps", "outgoing": "0.3 Mbps", "packets": "14,300",
-        "duration": "55 giây", "confidence": "91.4%",
-        "analysis": "Phát hiện hành vi thăm dò cổng FTP, SSH và Web từ mạng máy khách nội bộ 10.0.0.89, nghi ngờ máy trạm đã bị xâm nhập và đang do thám mạng ngang hàng.",
-    },
-    {
-        "protocol": "TCP (HTTPS)", "src_port": "56789", "dst_port": "443 (HTTPS)",
-        "incoming": "0.8 Mbps", "outgoing": "0.5 Mbps", "packets": "5,120",
-        "duration": "30 giây", "confidence": "88.7%",
-        "analysis": "Lưu lượng truy cập cổng 443 ngoài khung giờ làm việc tiêu chuẩn có biểu hiện truyền tải dữ liệu kích thước lớn hơn bình thường đến máy chủ lạ.",
-    },
-    {
-        "protocol": "TCP (FTP)", "src_port": "51239", "dst_port": "21 (FTP)",
-        "incoming": "1.9 Mbps", "outgoing": "0.2 Mbps", "packets": "11,400",
-        "duration": "1 phút 20 giây", "confidence": "93.1%",
-        "analysis": "Hàng trăm lượt kết nối xác thực tài khoản quản trị FTP thất bại từ máy trạm 10.0.0.23, có dấu hiệu quét mật khẩu mặc định của thiết bị.",
-    },
-    {
-        "protocol": "ICMP", "src_port": "N/A", "dst_port": "N/A",
-        "incoming": "15.4 Mbps", "outgoing": "2.1 Mbps", "packets": "125,000",
-        "duration": "4 phút 10 giây", "confidence": "85.2%",
-        "analysis": "Lưu lượng gói tin ICMP Echo Request tăng vọt bất thường kèm kích thước payload không theo chuẩn RFC, nghi ngờ hành vi ICMP Tunneling truyền dữ liệu lén lút.",
-    },
-]
+ALERT_DETAILS: list[dict[str, str]] = []
 
-ALERT_TRAFFIC_SERIES: list[tuple[list[tuple[list[int], str]], int]] = [
-    ([([75, 105, 145, 132, 165, 155, 185, 177, 211, 298, 188, 136, 152, 168, 139, 128], "#FF5B79"),
-      ([68, 96, 126, 119, 141, 137, 158, 151, 178, 238, 158, 122, 139, 151, 126, 115], "#3B82F6")], 300),
-    ([([5, 8, 12, 18, 24, 32, 45, 38, 52, 60, 48, 35, 28, 22, 18, 14], "#F59E0B"),
-      ([2, 3, 4, 6, 8, 10, 14, 12, 16, 18, 15, 11, 9, 7, 5, 4], "#3B82F6")], 80),
-    ([([8, 12, 15, 20, 28, 35, 42, 38, 45, 52, 48, 40, 32, 25, 18, 12], "#F59E0B"),
-      ([3, 4, 5, 7, 9, 11, 13, 12, 14, 16, 15, 12, 10, 8, 6, 5], "#3B82F6")], 70),
-    ([([12, 15, 18, 25, 35, 48, 62, 55, 70, 85, 72, 58, 42, 30, 22, 16], "#FBBF24"),
-      ([6, 8, 10, 14, 18, 24, 30, 27, 34, 42, 36, 29, 21, 15, 11, 8], "#3B82F6")], 100),
-    ([([20, 25, 32, 45, 58, 72, 88, 80, 95, 115, 98, 82, 65, 48, 35, 25], "#F59E0B"),
-      ([15, 18, 24, 32, 42, 52, 64, 58, 70, 84, 72, 60, 48, 36, 26, 18], "#3B82F6")], 140),
-    ([([85, 115, 160, 145, 180, 170, 210, 195, 240, 310, 220, 160, 175, 190, 155, 140], "#FF5B79"),
-      ([75, 102, 138, 128, 155, 148, 175, 165, 198, 260, 180, 140, 152, 165, 138, 125], "#3B82F6")], 320),
-    ([([6, 9, 14, 21, 28, 38, 48, 42, 55, 65, 52, 40, 31, 24, 19, 15], "#FBBF24"),
-      ([2, 3, 5, 7, 9, 12, 15, 13, 17, 20, 16, 12, 10, 8, 6, 5], "#3B82F6")], 80),
-    ([([4, 6, 8, 11, 15, 20, 26, 23, 30, 36, 28, 22, 17, 13, 10, 8], "#38BDF8"),
-      ([3, 4, 6, 8, 11, 14, 18, 16, 21, 25, 20, 15, 12, 9, 7, 6], "#3B82F6")], 50),
-    ([([9, 13, 17, 24, 32, 42, 54, 48, 62, 75, 60, 47, 36, 28, 21, 15], "#F59E0B"),
-      ([3, 4, 6, 8, 11, 14, 18, 16, 20, 24, 20, 16, 12, 9, 7, 5], "#3B82F6")], 90),
-    ([([25, 32, 42, 58, 75, 95, 120, 110, 135, 165, 140, 115, 90, 70, 50, 35], "#FBBF24"),
-      ([8, 11, 15, 20, 26, 34, 42, 38, 48, 58, 49, 40, 31, 24, 18, 12], "#3B82F6")], 180),
-]
+ALERT_TRAFFIC_SERIES: list[tuple[list[tuple[list[float], str]], int]] = []
 
 
 class AlertTimelineChart(QWidget):
-    low = [1, 2, 1, 2, 1, 2, 2, 1, 3, 2, 1, 2, 3, 2, 4, 2, 1, 3, 2, 1, 2, 3, 2, 1, 2, 3, 1, 2, 1, 2, 1, 2]
-    medium = [2, 3, 2, 4, 3, 5, 3, 4, 6, 4, 3, 5, 4, 8, 6, 4, 5, 6, 4, 5, 3, 5, 7, 4, 6, 4, 3, 5, 3, 4, 3, 5]
-    high = [3, 5, 4, 6, 4, 7, 5, 9, 6, 7, 5, 8, 6, 11, 7, 5, 8, 6, 7, 5, 6, 8, 15, 7, 5, 9, 6, 12, 7, 5, 4, 9]
-    critical = [5, 4, 6, 4, 5, 7, 5, 8, 6, 10, 7, 9, 6, 14, 11, 20, 8, 14, 7, 9, 6, 8, 10, 15, 7, 6, 9, 7, 12, 8, 5, 10]
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.low = [0.0] * 32
+        self.medium = [0.0] * 32
+        self.high = [0.0] * 32
+        self.critical = [0.0] * 32
         self.setMinimumHeight(185)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -212,7 +120,7 @@ class AlertsPage(QScrollArea):
         root.setContentsMargins(16, 12, 16, 16)
         root.setSpacing(12)
 
-        self.current_selected_row = 0
+        self.current_selected_row = -1
 
         # ---------------------------------------------------------------------
         # 1. HEADER (Title, Subtitle & SOC Action Controls)
@@ -225,22 +133,23 @@ class AlertsPage(QScrollArea):
         title.setObjectName("alertsHeading")
         intro.addWidget(title)
 
-        subtitle = QLabel("Hệ thống phát hiện sớm và giám sát toàn diện các sự kiện bất thường, mối đe dọa an ninh mạng thời gian thực")
+        subtitle = QLabel("Danh sách sự kiện từ IDS/IPS  •  Không sử dụng cảnh báo giả lập")
         subtitle.setObjectName("alertsSubtitle")
         subtitle.setWordWrap(True)
         intro.addWidget(subtitle)
         header.addLayout(intro, stretch=1)
 
         # Status badge
-        status_badge = QLabel("●  SOC MONITORING ACTIVE")
+        status_badge = QLabel("●  CHƯA CÓ NGUỒN CẢNH BÁO")
         status_badge.setStyleSheet(
-            "background: rgba(16, 185, 129, 0.14); color: #34D399; "
-            "border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 10px; "
+            "background: rgba(245, 158, 11, 0.14); color: #FBBF24; "
+            "border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 10px; "
             "padding: 6px 14px; font-weight: 700; font-size: 11px;"
         )
         header.addWidget(status_badge)
 
-        date_btn = QPushButton("  24/04/2025 00:00  →  24/04/2025 23:59  ˅")
+        today = datetime.now().strftime("%d/%m/%Y")
+        date_btn = QPushButton(f"  {today} 00:00  →  {today} 23:59  ˅")
         date_btn.setObjectName("alertsDate")
         date_btn.setIcon(icon("calendar", "#A78BFA", 14))
         header.addWidget(date_btn)
@@ -259,11 +168,11 @@ class AlertsPage(QScrollArea):
         metrics.setHorizontalSpacing(10)
         metrics.setVerticalSpacing(10)
         metric_data = [
-            MonitorMetric("Tổng cảnh báo", "127", "↑ 25.7%", "#FF5B79", "warning"),
-            MonitorMetric("Mức nghiêm trọng", "18 Khẩn cấp", "↑ 50.0%", "#FF4F5D", "blocked"),
-            MonitorMetric("Mức độ cao", "37 Rủi ro cao", "↑ 28.1%", "#F59E0B", "warning"),
-            MonitorMetric("Đang can thiệp", "27 Đang xử lý", "↓ 8.2%", "#3B82F6", "activity"),
-            MonitorMetric("Đã khắc phục", "82 Đã xử lý", "● 64.6%", "#10B981", "shield"),
+            MonitorMetric("Tổng cảnh báo", "0", "Chưa có", "#FF5B79", "warning"),
+            MonitorMetric("Mức nghiêm trọng", "0", "Chưa có", "#FF4F5D", "blocked"),
+            MonitorMetric("Mức độ cao", "0", "Chưa có", "#F59E0B", "warning"),
+            MonitorMetric("Đang can thiệp", "0", "Chưa có", "#3B82F6", "activity"),
+            MonitorMetric("Đã khắc phục", "0", "Chưa có", "#10B981", "shield"),
         ]
         for column, data in enumerate(metric_data):
             metrics.addWidget(MetricCard(data), 0, column)
@@ -294,32 +203,18 @@ class AlertsPage(QScrollArea):
         category = Panel("Phân loại cảnh báo theo hình thức tấn công")
         category_body = QHBoxLayout()
         category_body.setSpacing(14)
-        category_body.addWidget(
-            DonutChart(
-                [
-                    (28.3, "#FF5B79"),
-                    (22.0, "#F59E0B"),
-                    (15.0, "#6366F1"),
-                    (12.6, "#10B981"),
-                    (8.7, "#8B5CF6"),
-                    (13.4, "#94A3B8"),
-                ],
-                "",
-                "127",
-                "cảnh báo",
-            ),
-            1,
-        )
+        self.category_donut = DonutChart([], "", "0", "cảnh báo")
+        category_body.addWidget(self.category_donut, 1)
 
         category_legend = QVBoxLayout()
         category_legend.setSpacing(6)
         cat_items = [
-            ("#FF5B79", "DDoS Attack", "28.3%"),
-            ("#F59E0B", "Port Scan", "22.0%"),
-            ("#6366F1", "Brute Force", "15.0%"),
-            ("#10B981", "Malware C2", "12.6%"),
-            ("#8B5CF6", "SQL Injection", "8.7%"),
-            ("#94A3B8", "Khác / Anomaly", "13.4%"),
+            ("#FF5B79", "DDoS Attack", "0.0%"),
+            ("#F59E0B", "Port Scan", "0.0%"),
+            ("#6366F1", "Brute Force", "0.0%"),
+            ("#10B981", "Malware C2", "0.0%"),
+            ("#8B5CF6", "SQL Injection", "0.0%"),
+            ("#94A3B8", "Khác / Anomaly", "0.0%"),
         ]
         for color, text, value in cat_items:
             row = QHBoxLayout()
@@ -370,8 +265,7 @@ class AlertsPage(QScrollArea):
 
         self.setWidget(content)
 
-        # Initialize selection to first alert
-        self.update_detail(0)
+        self.show_empty_detail()
 
     # -------------------------------------------------------------------------
     # ALERTS TABLE PANEL (FULL WIDTH)
@@ -482,7 +376,7 @@ class AlertsPage(QScrollArea):
 
         for r, row in enumerate(ALERTS):
             self.table.setRowHeight(r, 28)
-            # ID (#A1024)
+            # Alert ID
             self.table.setCellWidget(r, 0, make_text_cell(row[0], "#A78BFA", is_mono=True, is_bold=True, align_center=True))
             # Time
             self.table.setCellWidget(r, 1, make_text_cell(row[1], "#CBD5E1"))
@@ -521,19 +415,20 @@ class AlertsPage(QScrollArea):
             # Action button
             self.table.setCellWidget(r, 8, make_text_cell("👁 Chi tiết", "#8B5CF6", is_bold=True, align_center=True))
 
-        self.table.selectRow(0)
+        if ALERTS:
+            self.table.selectRow(0)
         self.table.cellClicked.connect(lambda row, col: self.update_detail(row))
         self.table.itemSelectionChanged.connect(self._on_table_selection_changed)
         panel.box.addWidget(self.table)
 
         # Pagination footer
         footer = QHBoxLayout()
-        self.counter_label = QLabel(f"Hiển thị 1–{len(ALERTS)} / 127 cảnh báo")
+        self.counter_label = QLabel("Chưa có cảnh báo từ IDS/IPS")
         self.counter_label.setObjectName("flowFooter")
         footer.addWidget(self.counter_label)
         footer.addStretch()
 
-        for page in ("‹", "1", "2", "3", "4", "5", "…", "13", "›"):
+        for page in ("‹", "1", "›"):
             button = QPushButton(page)
             button.setObjectName("activePage" if page == "1" else "pageButton")
             footer.addWidget(button)
@@ -577,19 +472,19 @@ class AlertsPage(QScrollArea):
         panel.box.setSpacing(8)
 
         # Alert Banner
-        self.detail_title = QLabel("⚠  #A1024 - DDoS Attack")
+        self.detail_title = QLabel("Chưa có cảnh báo được chọn")
         self.detail_title.setObjectName("alertDetailTitle")
         panel.box.addWidget(self.detail_title)
 
         # Sub-status bar
         sub_bar = QHBoxLayout()
-        self.detail_severity = QLabel("Nghiêm trọng")
+        self.detail_severity = QLabel("—")
         self.detail_severity.setObjectName("criticalBadge")
         sub_bar.addWidget(self.detail_severity)
 
         sub_bar.addStretch()
 
-        self.confidence_label = QLabel("Độ tin cậy AI: 98.5%")
+        self.confidence_label = QLabel("Độ tin cậy AI: —")
         self.confidence_label.setStyleSheet("color: #34D399; font-size: 11px; font-weight: 700;")
         sub_bar.addWidget(self.confidence_label)
         panel.box.addLayout(sub_bar)
@@ -603,17 +498,17 @@ class AlertsPage(QScrollArea):
 
         self.detail_values: dict[str, QLabel] = {}
         fields = [
-            ("time", "Thời gian", "24/04/2025 14:32:11"),
-            ("source", "Nguồn IP", "10.0.0.23"),
-            ("destination", "Đích IP", "192.168.1.10"),
-            ("protocol", "Giao thức", "TCP (SYN Flood)"),
-            ("source_port", "Cổng nguồn", "52341"),
-            ("destination_port", "Cổng đích", "80 (HTTP)"),
-            ("incoming", "Lưu lượng vào", "125.4 Mbps"),
-            ("outgoing", "Lưu lượng ra", "118.2 Mbps"),
-            ("packets", "Số gói tin", "1,245,536"),
-            ("duration", "Thời gian kéo dài", "2 phút 15 giây"),
-            ("status", "Trạng thái", "Đang xử lý"),
+            ("time", "Thời gian", "—"),
+            ("source", "Nguồn IP", "—"),
+            ("destination", "Đích IP", "—"),
+            ("protocol", "Giao thức", "—"),
+            ("source_port", "Cổng nguồn", "—"),
+            ("destination_port", "Cổng đích", "—"),
+            ("incoming", "Lưu lượng vào", "—"),
+            ("outgoing", "Lưu lượng ra", "—"),
+            ("packets", "Số gói tin", "—"),
+            ("duration", "Thời gian kéo dài", "—"),
+            ("status", "Trạng thái", "—"),
         ]
 
         for key, label_text, value in fields:
@@ -642,9 +537,7 @@ class AlertsPage(QScrollArea):
         desc_heading.setObjectName("alertSectionTitle")
         panel.box.addWidget(desc_heading)
 
-        self.description = QLabel(
-            "Phát hiện lưu lượng TCP SYN tăng đột biến từ địa chỉ 10.0.0.23 đến 192.168.1.10. Tỷ lệ gói tin SYN/ACK bất thường, có dấu hiệu làm cạn kiệt tài nguyên backlog của máy chủ đích."
-        )
+        self.description = QLabel("Chưa có dữ liệu phân tích từ IDS/IPS.")
         self.description.setObjectName("alertDescription")
         self.description.setWordWrap(True)
         panel.box.addWidget(self.description)
@@ -657,12 +550,14 @@ class AlertsPage(QScrollArea):
         self.block_button.setObjectName("alertBlockButton")
         self.block_button.setIcon(icon("blocked", "#FFFFFF", 14))
         self.block_button.clicked.connect(self.block_ip)
+        self.block_button.setEnabled(False)
         actions.addWidget(self.block_button)
 
         self.resolve_button = QPushButton("Đánh dấu đã xử lý")
         self.resolve_button.setObjectName("alertResolveButton")
         self.resolve_button.setIcon(icon("check", "#C4B5FD", 14))
         self.resolve_button.clicked.connect(self.resolve_alert)
+        self.resolve_button.setEnabled(False)
         actions.addWidget(self.resolve_button)
 
         panel.box.addLayout(actions)
@@ -679,7 +574,7 @@ class AlertsPage(QScrollArea):
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(0, 0, 0, 4)
 
-        self.traffic_peak_chip = QLabel("Đỉnh lưu lượng: 125.4 Mbps")
+        self.traffic_peak_chip = QLabel("Đỉnh lưu lượng: —")
         self.traffic_peak_chip.setStyleSheet(
             "background: rgba(255, 91, 121, 0.15); color: #FF5B79; "
             "border: 1px solid rgba(255, 91, 121, 0.35); border-radius: 6px; "
@@ -692,11 +587,11 @@ class AlertsPage(QScrollArea):
         top_bar.addWidget(legend_chip("#3B82F6", "Lưu lượng ra"))
         panel.box.addLayout(top_bar)
 
-        default_series, default_max = ALERT_TRAFFIC_SERIES[0]
+        default_series, default_max = ([([0.0] * 16, "#FF5B79"), ([0.0] * 16, "#3B82F6")], 1)
         self.traffic_chart = Chart(
             default_series,
             default_max,
-            ["14:30", "14:31", "14:32", "14:33", "14:34"],
+            ["—", "—", "—", "—", "—"],
         )
         self.traffic_chart.setMinimumHeight(240)
         self.traffic_chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -706,6 +601,7 @@ class AlertsPage(QScrollArea):
 
     def update_detail(self, row: int) -> None:
         if row < 0 or row >= len(ALERTS):
+            self.show_empty_detail()
             return
 
         self.current_selected_row = row
@@ -731,7 +627,7 @@ class AlertsPage(QScrollArea):
         self.confidence_label.setText(f"Độ tin cậy AI: {details['confidence']}")
 
         # Properties
-        self.detail_values["time"].setText("24/04/2025 " + data[1].split(" ")[1])
+        self.detail_values["time"].setText(data[1])
         self.detail_values["source"].setText(data[2])
         self.detail_values["destination"].setText(data[3])
         self.detail_values["protocol"].setText(details["protocol"])
@@ -759,7 +655,6 @@ class AlertsPage(QScrollArea):
             series_data, max_val = ALERT_TRAFFIC_SERIES[row]
             self.traffic_chart.series = series_data
             self.traffic_chart.maximum = max_val
-            self.traffic_chart._baselines = [sum(vals) / max(1, len(vals)) for vals, _ in series_data]
             self.traffic_chart.update()
             if hasattr(self, "traffic_peak_chip"):
                 self.traffic_peak_chip.setText(f"Đỉnh lưu lượng: {details['incoming']}")
@@ -776,8 +671,24 @@ class AlertsPage(QScrollArea):
             self.resolve_button.setEnabled(True)
             self.resolve_button.setText("Đánh dấu đã xử lý")
 
+    def show_empty_detail(self) -> None:
+        self.current_selected_row = -1
+        self.detail_title.setText("Chưa có cảnh báo được chọn")
+        self.detail_severity.setText("—")
+        self.confidence_label.setText("Độ tin cậy AI: —")
+        for field in self.detail_values.values():
+            field.setText("—")
+        self.description.setText("Chưa có dữ liệu phân tích từ IDS/IPS.")
+        self.traffic_peak_chip.setText("Đỉnh lưu lượng: —")
+        self.block_button.setText("Chặn IP nguồn")
+        self.block_button.setEnabled(False)
+        self.resolve_button.setText("Đánh dấu đã xử lý")
+        self.resolve_button.setEnabled(False)
+
     def block_ip(self) -> None:
         row = self.current_selected_row
+        if row < 0 or row >= len(ALERTS):
+            return
         ALERTS[row][7] = "Đã xử lý"
         self.table.setCellWidget(
             row,
@@ -793,6 +704,8 @@ class AlertsPage(QScrollArea):
 
     def resolve_alert(self) -> None:
         row = self.current_selected_row
+        if row < 0 or row >= len(ALERTS):
+            return
         ALERTS[row][7] = "Đã xử lý"
         self.table.setCellWidget(
             row,

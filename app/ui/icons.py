@@ -21,6 +21,7 @@ PATHS = {
     "document": '<path d="M5 2h10l4 4v16H5V2Z"/><path d="M15 2v5h4M8 12h8M8 16h8"/>',
     "settings": '<circle cx="12" cy="12" r="3"/><path d="M10 2h4l.6 2.3 1.7.8 2.1-1.1 2.8 2.8-1.1 2.1.8 1.7L23 11v4l-2.3.6-.8 1.7 1.1 2.1-2.8 2.8-2.1-1.1-1.7.8L14 24h-4l-.6-2.3-1.7-.8-2.1 1.1-2.8-2.8 1.1-2.1-.8-1.7L1 15v-4l2.3-.6.8-1.7L3 6.6l2.8-2.8 2.1 1.1 1.7-.8L10 2Z" transform="translate(1 0) scale(.91)"/>',
     "menu": '<path d="M4 6h16M4 12h16M4 18h16"/>',
+    "more_vertical": '<path d="M12 5h.01M12 12h.01M12 19h.01" stroke-width="3"/>',
     "chevron": '<path d="m9 18 6-6-6-6"/>',
     "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     "search": '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',

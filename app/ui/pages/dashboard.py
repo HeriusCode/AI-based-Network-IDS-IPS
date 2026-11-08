@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QHBoxLayout,
     QLabel,
+    QComboBox,
     QProgressBar,
     QScrollArea,
     QSizePolicy,
@@ -212,11 +213,27 @@ class SystemCard(QFrame):
         self.progress.setValue(100 if available else 0)
 
 
+class TrafficRangeCombo(QComboBox):
+    """Time-range selector with a consistently visible down chevron."""
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor("#8EAED2"), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        center_x = self.width() - 17
+        center_y = self.height() / 2
+        painter.drawLine(QPointF(center_x - 4, center_y - 2), QPointF(center_x, center_y + 2))
+        painter.drawLine(QPointF(center_x, center_y + 2), QPointF(center_x + 4, center_y - 2))
+
+
 class TrafficChart(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.incoming: list[float] = [0.0] * 34
-        self.outgoing: list[float] = [0.0] * 34
+        self.history_seconds = 600
+        self.window_seconds = 600
+        self.incoming: list[float] = [0.0] * self.history_seconds
+        self.outgoing: list[float] = [0.0] * self.history_seconds
         self.setMinimumHeight(280)
         self.setMinimumWidth(220)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -226,12 +243,16 @@ class TrafficChart(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        left, top, right, bottom = 38, 14, 10, 24
+        left, top, right, bottom = 42, 28, 14, 24
         chart = QRectF(left, top, self.width() - left - right, self.height() - top - bottom)
-        raw_maximum = max([1.0, *self.incoming, *self.outgoing])
+        visible_incoming = self.incoming[-self.window_seconds:]
+        visible_outgoing = self.outgoing[-self.window_seconds:]
+        raw_maximum = max([1.0, *visible_incoming, *visible_outgoing])
         maximum = max(1.0, math.ceil(raw_maximum / 10.0) * 10.0) if raw_maximum > 10 else max(1.0, math.ceil(raw_maximum * 2) / 2)
 
         painter.setFont(QFont("Segoe UI", 8))
+        painter.setPen(QColor("#8E8BA7"))
+        painter.drawText(QRectF(0, 2, left - 5, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, "Mbps")
         for step in range(7):
             y = chart.bottom() - chart.height() * step / 6
             painter.setPen(QColor("#8E8BA7"))
@@ -242,14 +263,29 @@ class TrafficChart(QWidget):
             painter.drawLine(QPointF(chart.left(), y), QPointF(chart.right(), y))
 
         now = QDateTime.currentDateTime()
-        time_labels = [now.addSecs(-(5 - index) * 6).toString("HH:mm:ss") for index in range(6)]
+        time_labels = [
+            now.addSecs(-self.window_seconds + round(self.window_seconds * index / 5)).toString("HH:mm")
+            for index in range(6)
+        ]
         painter.setPen(QColor("#8E8BA7"))
         for step, label in enumerate(time_labels):
             x = chart.left() + chart.width() * step / (len(time_labels) - 1)
-            painter.drawText(QRectF(x - 22, chart.bottom() + 5, 44, 16), Qt.AlignmentFlag.AlignCenter, label)
+            if step == 0:
+                label_rect = QRectF(x + 2, chart.bottom() + 5, 48, 16)
+                alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            elif step == len(time_labels) - 1:
+                label_rect = QRectF(x - 50, chart.bottom() + 5, 48, 16)
+                alignment = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            else:
+                label_rect = QRectF(x - 24, chart.bottom() + 5, 48, 16)
+                alignment = Qt.AlignmentFlag.AlignCenter
+            painter.drawText(label_rect, alignment, label)
+            painter.setPen(QPen(QColor("#282452"), 1, Qt.PenStyle.DashLine))
+            painter.drawLine(QPointF(x, chart.top()), QPointF(x, chart.bottom()))
+            painter.setPen(QColor("#8E8BA7"))
 
-        self._draw_series(painter, chart, self.outgoing, maximum, QColor("#10B981"), fill_alpha=65)
-        self._draw_series(painter, chart, self.incoming, maximum, QColor("#8B5CF6"), fill_alpha=45)
+        self._draw_series(painter, chart, visible_outgoing, maximum, QColor("#10B981"), fill_alpha=65)
+        self._draw_series(painter, chart, visible_incoming, maximum, QColor("#2F9BFF"), fill_alpha=45)
 
     @staticmethod
     def _draw_series(painter: QPainter, chart: QRectF, values: list[float], maximum: float, color: QColor, fill_alpha: int = 50) -> None:
@@ -278,8 +314,12 @@ class TrafficChart(QWidget):
         painter.drawPath(path)
 
     def append_sample(self, incoming_mbps: float, outgoing_mbps: float) -> None:
-        self.incoming = [*self.incoming[-33:], max(0.0, incoming_mbps)]
-        self.outgoing = [*self.outgoing[-33:], max(0.0, outgoing_mbps)]
+        self.incoming = [*self.incoming[-(self.history_seconds - 1):], max(0.0, incoming_mbps)]
+        self.outgoing = [*self.outgoing[-(self.history_seconds - 1):], max(0.0, outgoing_mbps)]
+        self.update()
+
+    def set_window_seconds(self, seconds: int) -> None:
+        self.window_seconds = max(60, min(self.history_seconds, seconds))
         self.update()
 
 
@@ -742,15 +782,33 @@ class DashboardPage(QScrollArea):
         traffic_extra = QWidget()
         t_lay = QHBoxLayout(traffic_extra)
         t_lay.setContentsMargins(0, 0, 0, 0)
-        t_lay.setSpacing(10)
-        t_lay.addWidget(legend_row("#8B5CF6", "Vào", ""))
-        t_lay.addWidget(legend_row("#10B981", "Ra", ""))
+        self.traffic_range = TrafficRangeCombo()
+        self.traffic_range.setObjectName("trafficRangeCombo")
+        self.traffic_range.addItem("10 phút gần nhất", 600)
+        self.traffic_range.addItem("5 phút gần nhất", 300)
+        self.traffic_range.addItem("1 phút gần nhất", 60)
+        self.traffic_range.setFixedWidth(155)
+        t_lay.addWidget(self.traffic_range)
         self.speed_badge = QLabel("0.00 Mbps")
         self.speed_badge.setObjectName("panelChip")
         t_lay.addWidget(self.speed_badge)
 
-        traffic_panel = Panel("Lưu lượng mạng theo thời gian thực", "Băng thông trực tiếp", traffic_extra)
+        traffic_panel = Panel("Lưu lượng mạng theo thời gian thực", "", traffic_extra)
+        traffic_legend = QWidget()
+        traffic_legend.setMinimumWidth(0)
+        traffic_legend.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        traffic_legend_layout = QHBoxLayout(traffic_legend)
+        traffic_legend_layout.setContentsMargins(0, 0, 0, 0)
+        traffic_legend_layout.setSpacing(24)
+        traffic_legend_layout.addStretch(1)
+        traffic_legend_layout.addWidget(legend_row("#2F9BFF", "Lưu lượng vào (Incoming)", ""))
+        traffic_legend_layout.addWidget(legend_row("#10B981", "Lưu lượng ra (Outgoing)", ""))
+        traffic_legend_layout.addStretch(1)
+        traffic_panel.box.addWidget(traffic_legend)
         self.traffic_chart = TrafficChart()
+        self.traffic_range.currentIndexChanged.connect(
+            lambda index: self.traffic_chart.set_window_seconds(int(self.traffic_range.itemData(index)))
+        )
         traffic_panel.box.addWidget(self.traffic_chart, 1)
         top_row.addWidget(traffic_panel, 0, 0)
 
@@ -836,6 +894,7 @@ class DashboardPage(QScrollArea):
         proto_body.addWidget(self.protocol_donut, 1)
         proto_legend = QVBoxLayout()
         proto_legend.setSpacing(4)
+        proto_legend.addStretch(1)
         self.protocol_specs = [
             ("TCP", "#2F9BFF"),
             ("UDP", "#FF9B37"),
@@ -849,7 +908,7 @@ class DashboardPage(QScrollArea):
             row = protocol_bar_row(color, label, "0.0%", 0.0)
             self.protocol_rows[label] = row
             proto_legend.addWidget(row)
-        proto_legend.addStretch()
+        proto_legend.addStretch(1)
         proto_body.addLayout(proto_legend, 1)
         protocols_panel.box.addLayout(proto_body, 1)
         row3.addWidget(protocols_panel, 0, 0)

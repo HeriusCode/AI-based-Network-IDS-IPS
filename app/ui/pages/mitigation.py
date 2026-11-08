@@ -1,6 +1,8 @@
-"""IPS mitigation policy page using simulation-only actions."""
+"""IPS mitigation policy page without fabricated rules or enforcement events."""
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
@@ -30,31 +32,17 @@ from app.ui.pages.monitoring import MetricCard, MonitorMetric, Panel, legend_chi
 legend = legend_chip
 
 
-RULES = [
-    ["#R1024", "192.168.1.100", "any", "TCP", "80", "Chặn", "1", "28 phút", "Đang hoạt động"],
-    ["#R1023", "10.0.0.23", "192.168.1.10", "UDP", "any", "Giới hạn (10 Mbps)", "2", "1 giờ 25 phút", "Đang hoạt động"],
-    ["#R1022", "203.113.5.21", "any", "TCP", "443", "Chặn", "1", "15 phút", "Đang hoạt động"],
-    ["#R1021", "192.168.1.50", "8.8.8.8", "ICMP", "any", "Giới hạn (5 Mbps)", "3", "40 phút", "Đang hoạt động"],
-    ["#R1020", "192.168.1.77", "1.1.1.1", "TCP", "53", "Chặn", "2", "Đã hết hạn", "Không hoạt động"],
-    ["#R1019", "any", "any", "TCP", "22", "Chặn", "1", "Vô thời hạn", "Đang hoạt động"],
-    ["#R1018", "10.0.0.0/24", "any", "UDP", "any", "Giới hạn (2 Mbps)", "4", "3 giờ 10 phút", "Đang hoạt động"],
-]
+RULES: list[list[str]] = []
 
 
 class MitigationChart(QWidget):
     """Dual-curve comparison illustrating network traffic before vs after IPS mitigation enforcement."""
 
-    before = [
-        151, 173, 146, 153, 143, 162, 186, 168, 183, 170, 176, 195, 187, 211,
-        184, 207, 186, 199, 181, 193, 250, 198, 161, 149, 171, 191, 174, 186, 181, 193, 197,
-    ]
-    after = [
-        72, 86, 75, 80, 91, 79, 86, 97, 83, 91, 79, 88, 104, 94, 102,
-        96, 107, 91, 98, 104, 83, 90, 76, 93, 88, 96, 84, 101, 91, 105, 88,
-    ]
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.before = [0.0] * 31
+        self.after = [0.0] * 31
+        self.has_enforcement = False
         self.setMinimumHeight(230)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -86,7 +74,8 @@ class MitigationChart(QWidget):
             )
 
         # 2. X-axis time marks
-        labels = ["14:10", "14:15", "14:20", "14:25", "14:30", "14:35"]
+        now = datetime.now()
+        labels = [(now - timedelta(minutes=5 * (5 - index))).strftime("%H:%M") for index in range(6)]
         for index, label in enumerate(labels):
             x = chart.left() + chart.width() * index / (len(labels) - 1)
             painter.setPen(QPen(QColor("#1E1B3E"), 1, Qt.PenStyle.SolidLine))
@@ -105,7 +94,10 @@ class MitigationChart(QWidget):
         # 4. After mitigation curve (Blue #3B82F6 with subtle gradient)
         self._draw_curve(painter, chart, self.after, max_y, QColor("#3B82F6"), fill=True, fill_alpha=40)
 
-        # 5. Enforcement divider line at 58% (14:24)
+        if not self.has_enforcement:
+            return
+
+        # 5. Enforcement divider line at 58%.
         apply_x = chart.left() + chart.width() * 0.58
         painter.setPen(QPen(QColor("#8B5CF6"), 1.2, Qt.PenStyle.DashLine))
         painter.drawLine(QPointF(apply_x, chart.top()), QPointF(apply_x, chart.bottom()))
@@ -117,7 +109,7 @@ class MitigationChart(QWidget):
         painter.drawRoundedRect(pill_rect, 5, 5)
         painter.setFont(QFont("Segoe UI", 7.5, QFont.Weight.Bold))
         painter.setPen(QColor("#C4B5FD"))
-        painter.drawText(pill_rect, Qt.AlignmentFlag.AlignCenter, "● Kích hoạt Rule (14:24)")
+        painter.drawText(pill_rect, Qt.AlignmentFlag.AlignCenter, "● Kích hoạt rule")
 
     @staticmethod
     def _draw_curve(painter: QPainter, chart: QRectF, values: list[int], max_y: float, color: QColor, fill: bool = False, fill_alpha: int = 75) -> None:
@@ -231,7 +223,7 @@ class MitigationPage(QScrollArea):
         heading.setStyleSheet("color: #FFFFFF; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;")
         intro.addWidget(heading)
 
-        subtitle = QLabel("Quản lý và thực thi các chính sách bảo vệ mạng để giảm thiểu rủi ro an ninh mạng  •  Chế độ mô phỏng")
+        subtitle = QLabel("Quản lý chính sách bảo vệ mạng  •  Chưa kết nối IPS backend")
         subtitle.setObjectName("mitigationSubtitle")
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet("color: #8E8BA7; font-size: 11.5px; font-weight: 400;")
@@ -241,7 +233,7 @@ class MitigationPage(QScrollArea):
         controls = QHBoxLayout()
         controls.setSpacing(8)
 
-        self.ips_toggle = QPushButton("●  IPS HOẠT ĐỘNG")
+        self.ips_toggle = QPushButton("●  CHƯA KẾT NỐI IPS")
         self.ips_toggle.setObjectName("ipsToggle")
         self.ips_toggle.setStyleSheet("""
             QPushButton#ipsToggle {
@@ -257,20 +249,23 @@ class MitigationPage(QScrollArea):
             }
         """)
         self.ips_toggle.setCheckable(True)
-        self.ips_toggle.setChecked(True)
+        self.ips_toggle.setChecked(False)
+        self.ips_toggle.setEnabled(False)
         self.ips_toggle.clicked.connect(self.toggle_ips)
         controls.addWidget(self.ips_toggle)
 
-        self.mode_button = QPushButton("  Chế độ: Tự động chặn  ˅")
+        self.mode_button = QPushButton("  Chế độ: Chưa khả dụng")
         self.mode_button.setObjectName("dateRangeButton")
         self.mode_button.setIcon(icon("shield", "#AFC7E4", 13))
         self.mode_button.setFixedHeight(34)
+        self.mode_button.setEnabled(False)
         controls.addWidget(self.mode_button)
 
         self.pause_button = QPushButton("  Tạm dừng IPS")
         self.pause_button.setObjectName("pauseIpsButton")
         self.pause_button.setIcon(icon("pause", "#FFFFFF", 13))
         self.pause_button.setFixedHeight(34)
+        self.pause_button.setEnabled(False)
         self.pause_button.clicked.connect(self.toggle_ips)
         controls.addWidget(self.pause_button)
 
@@ -282,11 +277,11 @@ class MitigationPage(QScrollArea):
         metrics.setHorizontalSpacing(10)
         metrics.setVerticalSpacing(10)
         metric_data = [
-            MonitorMetric("Tổng rules hoạt động", "12 Rules", "↑ 20.0%", "#10B981", "shield"),
-            MonitorMetric("Lưu lượng bị chặn", "1,245 gói", "↑ 35.2%", "#FF5B79", "blocked"),
-            MonitorMetric("Lưu lượng bị giới hạn", "856 gói", "↑ 18.7%", "#FBBF24", "speed"),
-            MonitorMetric("Sự kiện giảm thiểu", "2,101 sự kiện", "↑ 22.5%", "#3B82F6", "document"),
-            MonitorMetric("Hiệu quả bảo vệ", "98.4%", "↑ 1.2%", "#A78BFA", "brain"),
+            MonitorMetric("Tổng rules hoạt động", "0", "Chưa có", "#10B981", "shield"),
+            MonitorMetric("Lưu lượng bị chặn", "0 gói", "Chưa có", "#FF5B79", "blocked"),
+            MonitorMetric("Lưu lượng bị giới hạn", "0 gói", "Chưa có", "#FBBF24", "speed"),
+            MonitorMetric("Sự kiện giảm thiểu", "0", "Chưa có", "#3B82F6", "document"),
+            MonitorMetric("Hiệu quả bảo vệ", "—", "Chưa có", "#A78BFA", "brain"),
         ]
         for column, data in enumerate(metric_data):
             metrics.addWidget(MetricCard(data), 0, column)
@@ -316,7 +311,7 @@ class MitigationPage(QScrollArea):
         impact_row.addWidget(traffic_panel, 0, 0)
 
         # 3.2 Hiệu quả giảm thiểu Donut
-        donut_badge = QLabel("98.4% Tối ưu")
+        donut_badge = QLabel("Chưa có dữ liệu")
         donut_badge.setStyleSheet(
             "color: #10B981; background: rgba(16, 185, 129, 0.15); "
             "border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 2px 7px; font-size: 11px; font-weight: 700;"
@@ -324,26 +319,28 @@ class MitigationPage(QScrollArea):
         eff_panel = Panel("Hiệu quả giảm thiểu", "Tỷ trọng lưu lượng bất thường đã được xử lý", donut_badge)
         eff_body = QHBoxLayout()
         eff_body.setSpacing(12)
-        eff_body.addWidget(
-            DonutChart(
-                [(45.2, "#FF5B79"), (23.2, "#FBBF24"), (31.6, "#10B981")],
-                "Hiệu quả",
-                "68.4%",
-                "đã xử lý",
-            ),
-            1,
-        )
+        self.efficiency_donut = DonutChart([], "Hiệu quả", "—", "chưa có dữ liệu")
+        eff_body.addWidget(self.efficiency_donut, 4)
 
         eff_legend = QVBoxLayout()
         eff_legend.setSpacing(4)
-        for color, label, val, pct in [
-            ("#FF5B79", "Lưu lượng bị chặn", "45.2%", 45.2),
-            ("#FBBF24", "Lưu lượng bị giới hạn", "23.2%", 23.2),
-            ("#10B981", "Lưu lượng an toàn", "31.6%", 31.6),
+        eff_legend.addStretch(1)
+        self.efficiency_rows: list[QWidget] = []
+        for color, label in [
+            ("#FF5B79", "Lưu lượng bị chặn"),
+            ("#FBBF24", "Lưu lượng bị giới hạn"),
+            ("#10B981", "Lưu lượng an toàn"),
         ]:
-            eff_legend.addWidget(protocol_bar_row(color, label, val, pct))
-        eff_legend.addStretch()
-        eff_body.addLayout(eff_legend, 1)
+            row = protocol_bar_row(color, label, "0.0%", 0.0)
+            for text_label in row.findChildren(QLabel):
+                if text_label.text() == label:
+                    text_label.setMinimumWidth(145)
+                    text_label.setMaximumWidth(16777215)
+                    break
+            self.efficiency_rows.append(row)
+            eff_legend.addWidget(row)
+        eff_legend.addStretch(1)
+        eff_body.addLayout(eff_legend, 6)
         eff_panel.box.addLayout(eff_body, 1)
         impact_row.addWidget(eff_panel, 0, 1)
 
@@ -367,7 +364,7 @@ class MitigationPage(QScrollArea):
         self.setWidget(content)
 
     def _rules_panel(self) -> Panel:
-        badge = QLabel("12 Rules")
+        badge = QLabel("0 rules")
         badge.setStyleSheet(
             "color: #C4B5FD; background: rgba(139, 92, 246, 0.15); "
             "border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 2px 7px; font-size: 11px; font-weight: 700;"
@@ -503,13 +500,13 @@ class MitigationPage(QScrollArea):
         # Pagination
         footer = QHBoxLayout()
         footer.setContentsMargins(4, 4, 4, 0)
-        count = QLabel("Hiển thị 1–7 / 12 rule")
+        count = QLabel("Chưa có chính sách từ IPS backend")
         count.setObjectName("flowFooter")
         count.setStyleSheet("color: #8E8BA7; font-size: 11px;")
         footer.addWidget(count)
         footer.addStretch()
 
-        for page in ("‹", "1", "2", "3", "›"):
+        for page in ("‹", "1", "›"):
             button = QPushButton(page)
             button.setObjectName("activePage" if page == "1" else "pageButton")
             button.setFixedSize(28, 28)
@@ -622,23 +619,17 @@ class MitigationPage(QScrollArea):
         return field
 
     def _history_panel(self) -> Panel:
-        badge = QLabel("5 Sự kiện mới nhất")
+        badge = QLabel("0 sự kiện")
         badge.setStyleSheet(
             "color: #C4B5FD; background: rgba(139, 92, 246, 0.15); "
             "border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 2px 7px; font-size: 11px; font-weight: 700;"
         )
         panel = Panel("Nhật ký thực thi giảm thiểu gần đây (IPS Audit Log)", "Ghi nhận toàn bộ thao tác kích hoạt, chỉnh sửa và gỡ bỏ chính sách bảo vệ", badge)
 
-        history_items = [
-            ("blocked", "#FF5B79", "Đã chặn toàn bộ lưu lượng tấn công Port Scan", "Địa chỉ nguồn 192.168.1.100 nhắm vào Cổng 80", "24/04/2025 14:32:11", "CHẶN IP"),
-            ("speed", "#FBBF24", "Áp dụng giới hạn băng thông 10 Mbps (Rate Limit)", "Địa chỉ nguồn 10.0.0.23 lưu lượng UDP đột biến", "24/04/2025 14:30:45", "GIỚI HẠN"),
-            ("blocked", "#FF5B79", "Kích hoạt chính sách chống tấn công DDoS tự động", "Địa chỉ IP nguy hiểm 203.113.5.21 bị khóa cổng 443", "24/04/2025 14:28:17", "CHẶN IP"),
-            ("check", "#10B981", "Hệ thống tự động gỡ bỏ rule #R1016 (Hết hạn cách ly)", "Khôi phục trạng thái hoạt động bình thường cho dải mạng", "24/04/2025 14:25:33", "GỠ BỎ"),
-            ("speed", "#FBBF24", "Giới hạn lưu lượng ICMP bất thường (5 Mbps)", "Địa chỉ 192.168.1.50 gửi ping flood liên tục", "24/04/2025 14:21:05", "GIỚI HẠN"),
-        ]
-
-        for data in history_items:
-            panel.box.addWidget(HistoryRow(*data))
+        empty = QLabel("Chưa có lịch sử thực thi từ IPS backend")
+        empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty.setStyleSheet("color: #8E8BA7; font-size: 12px; padding: 28px 8px;")
+        panel.box.addWidget(empty)
 
         return panel
 
@@ -687,8 +678,8 @@ class MitigationPage(QScrollArea):
             self.rule_status.setText("⚠ Vui lòng nhập địa chỉ IP nguồn cần áp dụng.")
             self.rule_status.setProperty("valid", False)
         else:
-            self.rule_status.setText("✓ Đã khởi tạo và áp dụng chính sách mới thành công!")
-            self.rule_status.setProperty("valid", True)
+            self.rule_status.setText("⚠ Chưa kết nối IPS backend nên chưa thể áp dụng chính sách.")
+            self.rule_status.setProperty("valid", False)
         self.rule_status.style().unpolish(self.rule_status)
         self.rule_status.style().polish(self.rule_status)
 

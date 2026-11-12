@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThreadPool, Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -25,6 +27,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.icons import icon
+from app.services.ai_client import AiClient
+from app.services.detection_pipeline import AiHealthWorker, DetectionCsvWorker
 from app.ui.pages.dashboard import (
     DonutChart,
     make_badge_cell,
@@ -42,6 +46,10 @@ ATTACK_DESCRIPTIONS: dict[str, str] = {}
 class DetectionPage(QScrollArea):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.ai_client = AiClient(timeout=45.0)
+        self.thread_pool = QThreadPool.globalInstance()
+        self._csv_worker: DetectionCsvWorker | None = None
+        self._health_worker: AiHealthWorker | None = None
         self.setObjectName("detectionScroll")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -74,14 +82,14 @@ class DetectionPage(QScrollArea):
         controls = QHBoxLayout()
         controls.setSpacing(8)
 
-        ai_badge = QLabel("●  CHƯA CÓ KẾT QUẢ AI")
-        ai_badge.setObjectName("liveBadge")
-        ai_badge.setStyleSheet(
+        self.ai_badge = QLabel("●  ĐANG KIỂM TRA AI")
+        self.ai_badge.setObjectName("liveBadge")
+        self.ai_badge.setStyleSheet(
             "color: #10B981; background: rgba(16, 185, 129, 0.12); "
             "border: 1px solid rgba(16, 185, 129, 0.25); "
             "border-radius: 6px; padding: 4px 10px; font-size: 11px; font-weight: 700;"
         )
-        controls.addWidget(ai_badge)
+        controls.addWidget(self.ai_badge)
 
         today = datetime.now().strftime("%d/%m/%Y")
         self.date_button = QPushButton(f"  {today} 00:00   →   {today} 23:59  ˅")
@@ -90,11 +98,18 @@ class DetectionPage(QScrollArea):
         self.date_button.setFixedHeight(36)
         controls.addWidget(self.date_button)
 
-        refresh = QPushButton("  Làm mới")
+        self.import_button = QPushButton("  Chọn CSV kiểm thử")
+        self.import_button.setObjectName("detectionRefresh")
+        self.import_button.setIcon(icon("download", "#FFFFFF", 14))
+        self.import_button.setFixedHeight(36)
+        self.import_button.clicked.connect(self.choose_csv)
+        controls.addWidget(self.import_button)
+
+        refresh = QPushButton("  Kiểm tra AI")
         refresh.setObjectName("detectionRefresh")
         refresh.setIcon(icon("refresh", "#FFFFFF", 14))
         refresh.setFixedHeight(36)
-        refresh.clicked.connect(self.refresh_data)
+        refresh.clicked.connect(self.check_ai_health)
         controls.addWidget(refresh)
 
         header.addLayout(controls)
@@ -203,6 +218,7 @@ class DetectionPage(QScrollArea):
         root.addLayout(bottom)
 
         self.setWidget(content)
+        self.check_ai_health()
 
     def _detections_panel(self) -> Panel:
         self.detection_badge = QLabel("0 phát hiện")
@@ -336,6 +352,7 @@ class DetectionPage(QScrollArea):
             "UDP": ("rgba(255, 155, 55, 0.18)", "#FDBA74", "rgba(255, 155, 55, 0.35)"),
             "ICMP": ("rgba(149, 81, 232, 0.18)", "#C4B5FD", "rgba(149, 81, 232, 0.35)"),
         }
+        self.proto_colors = proto_colors
 
         attack_colors = {
             "DDoS Attack": ("rgba(255, 91, 121, 0.18)", "#FF5B79", "rgba(255, 91, 121, 0.35)"),
@@ -346,12 +363,14 @@ class DetectionPage(QScrollArea):
             "Protocol Anomaly": ("rgba(236, 72, 153, 0.18)", "#F472B6", "rgba(236, 72, 153, 0.35)"),
             "Suspicious Traffic": ("rgba(20, 184, 166, 0.18)", "#2DD4BF", "rgba(20, 184, 166, 0.35)"),
         }
+        self.attack_colors = attack_colors
 
         risk_colors = {
             "Cao": ("rgba(255, 91, 121, 0.18)", "#FF5B79", "rgba(255, 91, 121, 0.35)"),
             "Trung bình": ("rgba(251, 191, 36, 0.18)", "#FBBF24", "rgba(251, 191, 36, 0.35)"),
             "Thấp": ("rgba(16, 185, 129, 0.18)", "#34D399", "rgba(16, 185, 129, 0.35)"),
         }
+        self.risk_colors = risk_colors
 
         status_colors = {
             "Đang xử lý": ("rgba(255, 91, 121, 0.18)", "#FF5B79", "rgba(255, 91, 121, 0.35)"),
@@ -359,6 +378,7 @@ class DetectionPage(QScrollArea):
             "Đang giám sát": ("rgba(56, 189, 248, 0.18)", "#38BDF8", "rgba(56, 189, 248, 0.35)"),
             "Đã xử lý": ("rgba(16, 185, 129, 0.18)", "#10B981", "rgba(16, 185, 129, 0.35)"),
         }
+        self.status_colors = status_colors
 
         for r, row in enumerate(DETECTIONS):
             self.table.setRowHeight(r, 37)
@@ -601,6 +621,182 @@ class DetectionPage(QScrollArea):
 
         return panel
 
+    def _populate_detection_table(self) -> None:
+        self.table.clearContents()
+        self.table.setRowCount(len(DETECTIONS))
+        for row_index, row in enumerate(DETECTIONS):
+            self.table.setRowHeight(row_index, 37)
+            self.table.setCellWidget(row_index, 0, make_text_cell(row[0], color="#8E8BA7", align_center=True))
+            self.table.setCellWidget(row_index, 1, make_text_cell(row[1], color="#CBD5E1", align_center=True))
+            self.table.setCellWidget(row_index, 2, make_text_cell(row[2], color="#FFFFFF", is_mono=True, is_bold=True))
+            self.table.setCellWidget(row_index, 3, make_text_cell(row[3], color="#C4B5FD", is_mono=True))
+            p_bg, p_fg, p_bd = self.proto_colors.get(row[4], ("#25224D", "#FFFFFF", "#383466"))
+            self.table.setCellWidget(row_index, 4, make_badge_cell(row[4], p_bg, p_fg, p_bd))
+            a_bg, a_fg, a_bd = self.attack_colors.get(row[5], ("#25224D", "#FFFFFF", "#383466"))
+            self.table.setCellWidget(row_index, 5, make_badge_cell(row[5], a_bg, a_fg, a_bd))
+            self.table.setCellWidget(
+                row_index, 6,
+                make_badge_cell(row[6], "rgba(16, 185, 129, 0.15)", "#34D399", "rgba(16, 185, 129, 0.3)"),
+            )
+            r_bg, r_fg, r_bd = self.risk_colors.get(row[7], ("#25224D", "#FFFFFF", "#383466"))
+            self.table.setCellWidget(row_index, 7, make_badge_cell(row[7], r_bg, r_fg, r_bd))
+            s_bg, s_fg, s_bd = self.status_colors.get(row[8], ("#25224D", "#FFFFFF", "#383466"))
+            self.table.setCellWidget(row_index, 8, make_badge_cell(row[8], s_bg, s_fg, s_bd))
+            self.table.setCellWidget(row_index, 9, make_text_cell("◉  ⋮", color="#8E8BA7", align_center=True))
+        if DETECTIONS:
+            self.table.selectRow(0)
+            self.update_detail(0)
+        else:
+            self.show_empty_detail()
+
+    @staticmethod
+    def _record_value(record: dict, *names: str, default: str = "—") -> str:
+        for name in names:
+            value = record.get(name)
+            if value is not None and str(value).strip():
+                return str(value)
+        return default
+
+    @classmethod
+    def _protocol_name(cls, record: dict) -> str:
+        raw = cls._record_value(record, "Protocol", "protocol", default="—")
+        try:
+            code = int(float(raw))
+        except ValueError:
+            return raw.upper()
+        return {1: "ICMP", 6: "TCP", 17: "UDP"}.get(code, str(code))
+
+    def check_ai_health(self) -> None:
+        self.ai_badge.setText("●  ĐANG KIỂM TRA AI")
+        worker = AiHealthWorker(self.ai_client)
+        worker.signals.completed.connect(self._health_ok)
+        worker.signals.failed.connect(self._health_failed)
+        self._health_worker = worker
+        self.thread_pool.start(worker)
+
+    def _health_ok(self, payload: dict) -> None:
+        online = payload.get("status") == "ok"
+        count = payload.get("detection_feature_count", "?")
+        self.ai_badge.setText(f"●  AI ONLINE · {count} FEATURES" if online else "●  MODEL CHƯA NẠP")
+        self.import_button.setEnabled(online)
+        self.ai_badge.setStyleSheet(
+            "color: #10B981; background: rgba(16, 185, 129, 0.12); "
+            "border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 6px; "
+            "padding: 4px 10px; font-size: 11px; font-weight: 700;"
+        )
+
+    def _health_failed(self, message: str) -> None:
+        self.ai_badge.setText("●  AI OFFLINE")
+        self.import_button.setEnabled(False)
+        self.ai_badge.setToolTip(message)
+        self.ai_badge.setStyleSheet(
+            "color: #FF5B79; background: rgba(255, 91, 121, 0.12); "
+            "border: 1px solid rgba(255, 91, 121, 0.3); border-radius: 6px; "
+            "padding: 4px 10px; font-size: 11px; font-weight: 700;"
+        )
+
+    def choose_csv(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Chọn CSV flow để kiểm thử AI",
+            "",
+            "CSV files (*.csv);;All files (*.*)",
+        )
+        if not path:
+            return
+        self.import_button.setEnabled(False)
+        self.import_button.setText("  Đang phân tích...")
+        self.ai_badge.setText("●  AI ĐANG PHÂN TÍCH 0 FLOW")
+        worker = DetectionCsvWorker(path, self.ai_client)
+        worker.signals.progress.connect(self._analysis_progress)
+        worker.signals.completed.connect(self._analysis_completed)
+        worker.signals.failed.connect(self._analysis_failed)
+        self._csv_worker = worker
+        self.thread_pool.start(worker)
+
+    def _analysis_progress(self, processed: int, maximum: int) -> None:
+        self.ai_badge.setText(f"●  ĐANG PHÂN TÍCH {processed:,}/{maximum:,} FLOW")
+
+    def _analysis_failed(self, message: str) -> None:
+        self.import_button.setEnabled(True)
+        self.import_button.setText("  Chọn CSV kiểm thử")
+        self.ai_badge.setText("●  PHÂN TÍCH THẤT BẠI")
+        QMessageBox.critical(self, "Không thể phân tích CSV", message)
+
+    def _analysis_completed(self, result: dict) -> None:
+        DETECTIONS.clear()
+        PORT_MAPPINGS.clear()
+        ATTACK_DESCRIPTIONS.clear()
+        risk_names = {"HIGH": "Cao", "MEDIUM": "Trung bình", "LOW": "Thấp"}
+        for alert in result["alerts"]:
+            record = alert["record"]
+            alert_id = str(alert["id"])
+            attack_type = str(alert["attack_type"])
+            time_text = self._record_value(record, "Timestamp", "timestamp")
+            source_ip = self._record_value(record, "Source IP", "Src IP", "source_ip")
+            destination_ip = self._record_value(record, "Destination IP", "Dst IP", "destination_ip")
+            protocol = self._protocol_name(record)
+            score = float(alert["score"])
+            risk = risk_names.get(str(alert["risk"]), "Trung bình")
+            DETECTIONS.append(
+                [
+                    alert_id, time_text, source_ip, destination_ip, protocol,
+                    attack_type, f"{score * 100:.1f}%", risk, "Đang giám sát",
+                ]
+            )
+            PORT_MAPPINGS[alert_id] = (
+                self._record_value(record, "Source Port", "Src Port", "source_port"),
+                self._record_value(record, "Destination Port", "Dst Port", "destination_port"),
+            )
+            ATTACK_DESCRIPTIONS[attack_type] = (
+                f"Flow được detector nhị phân gắn cờ với score {score:.3f}. "
+                f"Phân loại tham khảo: {attack_type}; cần analyst xác minh trước khi chặn."
+            )
+
+        self._populate_detection_table()
+        total = int(result["total"])
+        benign = int(result["benign"])
+        attack = int(result["attack"])
+        high = int(result["high"])
+        average_score = float(result["average_score"])
+        values = (
+            (f"{attack:,}", "AI", attack),
+            (f"{benign:,}", f"{benign / total:.1%}", benign),
+            (f"{attack:,}", f"{attack / total:.1%}", attack),
+            (f"{average_score:.1%}", "Score TB", average_score * 100),
+            (f"{high:,}", "HIGH", high),
+        )
+        for card, (value, change, spark) in zip(self.metric_cards, values):
+            card.set_data(value, change, float(spark))
+
+        trend = list(result.get("trend", []))[-32:]
+        if trend:
+            padding = [[0, 0]] * (32 - len(trend))
+            points = padding + trend
+            self.trend_chart.series[0][0][:] = [item[0] for item in points]
+            self.trend_chart.series[1][0][:] = [item[1] for item in points]
+            self.trend_chart.maximum = max(1, int(max(max(item) for item in points) * 1.2))
+            self.trend_chart.update()
+
+        palette = ["#FF5B79", "#FB923C", "#60A5FA", "#C084FC", "#FACC15", "#10B981"]
+        type_counts = result.get("attack_types", {})
+        segments = [
+            (count * 100.0 / max(1, attack), palette[index % len(palette)])
+            for index, count in enumerate(type_counts.values())
+        ]
+        self.attack_donut.set_data(segments, str(attack), "phát hiện")
+        self.attack_badge.setText(f"{len(type_counts)} loại")
+        self.detection_badge.setText(f"{attack:,} phát hiện")
+        visible = len(result["alerts"])
+        cap_note = f"; hiển thị {visible:,}" if visible < attack else ""
+        limit_note = f"; giới hạn {result['max_rows']:,} dòng" if result.get("limited") else ""
+        self.result_count.setText(
+            f"Đã phân tích {total:,} flow · model {result['model_version']}{cap_note}{limit_note}"
+        )
+        self.ai_badge.setText("●  AI ONLINE · PHÂN TÍCH HOÀN TẤT")
+        self.import_button.setEnabled(True)
+        self.import_button.setText("  Chọn CSV kiểm thử")
+
     def update_detail(self, row: int) -> None:
         if row < 0 or row >= len(DETECTIONS):
             self.show_empty_detail()
@@ -665,7 +861,10 @@ class DetectionPage(QScrollArea):
         self.block_button.setEnabled(False)
 
     def refresh_data(self) -> None:
-        # No detector/backend is connected yet. Keep the view honest and empty.
+        DETECTIONS.clear()
+        PORT_MAPPINGS.clear()
+        ATTACK_DESCRIPTIONS.clear()
+        self._populate_detection_table()
         for card, value in zip(self.metric_cards, ("0", "0", "0", "—", "0")):
             card.set_data(value, "Chưa có", 0.0)
         self.trend_chart.update()

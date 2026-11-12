@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QDateTime, QSize, Qt, QTimer, QTimeZone, Signal
+from PySide6.QtCore import QDateTime, QSize, Qt, QThreadPool, QTimer, QTimeZone, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.icons import icon
+from app.services.ai_client import AiClient
+from app.services.detection_pipeline import AiHealthWorker
 
 
 class Topbar(QFrame):
@@ -41,11 +43,11 @@ class Topbar(QFrame):
         self.demo_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_layout.addWidget(self.demo_status)
 
-        self.backend_status = QLabel("☁  Backend: Online")
+        self.backend_status = QLabel("☁  AI Backend: Checking")
         self.backend_status.setObjectName("onlineStatus")
         self.backend_status.setFixedHeight(28)
         self.backend_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.backend_status.setToolTip("Trạng thái mô phỏng; sẵn sàng kết nối dữ liệu.")
+        self.backend_status.setToolTip("Đang kiểm tra FastAPI inference service.")
         status_layout.addWidget(self.backend_status)
 
         layout.addWidget(status_group, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -89,6 +91,13 @@ class Topbar(QFrame):
         self._timer.timeout.connect(self._update_clock)
         self._timer.start(1000)
         self._update_clock()
+
+        self._ai_client = AiClient(timeout=3.0)
+        self._health_worker: AiHealthWorker | None = None
+        self._health_timer = QTimer(self)
+        self._health_timer.timeout.connect(self._check_backend)
+        self._health_timer.start(5000)
+        self._check_backend()
 
         # 4. Separator 1
         sep1 = QFrame()
@@ -185,6 +194,41 @@ class Topbar(QFrame):
     def set_compact(self, compact: bool) -> None:
         self.backend_status.setVisible(not compact)
         self.demo_status.setText("● Hoạt động" if compact else "●  Hệ thống: Hoạt động")
+
+    def _check_backend(self) -> None:
+        if self._health_worker is not None:
+            return
+        worker = AiHealthWorker(self._ai_client)
+        worker.signals.completed.connect(self._backend_online)
+        worker.signals.failed.connect(self._backend_offline)
+        self._health_worker = worker
+        QThreadPool.globalInstance().start(worker)
+
+    def _backend_online(self, payload: dict) -> None:
+        self._health_worker = None
+        if payload.get("status") == "ok":
+            self.backend_status.setText("☁  AI Backend: Online")
+            self.backend_status.setObjectName("onlineStatus")
+            self.backend_status.setStyleSheet("")
+            self.backend_status.setToolTip(
+                f"Model {payload.get('model_version', 'unknown')} · "
+                f"{payload.get('detection_feature_count', '?')} features"
+            )
+        else:
+            self._backend_offline("Model detection chưa được nạp.")
+        self.backend_status.style().unpolish(self.backend_status)
+        self.backend_status.style().polish(self.backend_status)
+
+    def _backend_offline(self, message: str) -> None:
+        self._health_worker = None
+        self.backend_status.setText("☁  AI Backend: Offline")
+        self.backend_status.setObjectName("offlineStatus")
+        self.backend_status.setToolTip(message)
+        self.backend_status.setStyleSheet(
+            "color: #FF5B79; background: rgba(255, 91, 121, 0.12); "
+            "border: 1px solid rgba(255, 91, 121, 0.25); border-radius: 6px; "
+            "padding: 4px 10px; font-size: 11px; font-weight: 700;"
+        )
 
     def _update_clock(self) -> None:
         now = QDateTime.currentDateTimeUtc().toTimeZone(QTimeZone(b"Asia/Bangkok"))

@@ -1,11 +1,13 @@
 """Application shell, frameless controls and resize behavior."""
 
 from PySide6.QtCore import QEvent, QRect, Qt, Signal
-from PySide6.QtGui import QCursor, QMouseEvent
+from PySide6.QtGui import QCloseEvent, QCursor, QMouseEvent
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
 
 from app.core.config import WINDOW_TITLE
 from app.core.navigation import NAV_ITEMS
+from app.core.server_config import ServerConfigManager
+from app.services.web_server import WebServerController
 from app.ui.dialogs import LogoutConfirmDialog
 from app.ui.pages.dashboard import DashboardPage
 from app.ui.pages.alerts import AlertsPage
@@ -47,6 +49,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self.server_config_manager = ServerConfigManager(parent=self)
+        self.web_server = WebServerController(parent=self)
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setWindowTitle(WINDOW_TITLE)
         self.resize(1536, 960)
@@ -81,7 +85,10 @@ class MainWindow(QMainWindow):
         self._page_index: dict[str, int] = {}
         self._loaded_pages: dict[str, QWidget] = {}
         self._page_factories = {
-            "dashboard": DashboardPage,
+            "dashboard": lambda: DashboardPage(
+                server_config=self.server_config_manager,
+                web_server=self.web_server,
+            ),
             "monitoring": MonitoringPage,
             "detection": DetectionPage,
             "prediction": PredictionPage,
@@ -89,11 +96,14 @@ class MainWindow(QMainWindow):
             "topology": TopologyPage,
             "alerts": AlertsPage,
             "reports": ReportsPage,
-            "settings": SettingsPage,
+            "settings": lambda: SettingsPage(server_config=self.server_config_manager),
         }
         for item in NAV_ITEMS:
             if item.key == "dashboard":
-                page = DashboardPage()
+                page = DashboardPage(
+                    server_config=self.server_config_manager,
+                    web_server=self.web_server,
+                )
                 self._loaded_pages[item.key] = page
             elif item.key in self._page_factories:
                 page = QWidget()
@@ -190,3 +200,8 @@ class MainWindow(QMainWindow):
             self.topbar.set_maximized(self.isMaximized())
             self.sidebar.account.setVisible(True)
             self._position_resize_handles()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self.web_server.is_running:
+            self.web_server.stop()
+        super().closeEvent(event)

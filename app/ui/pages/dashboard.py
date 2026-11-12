@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from PySide6.QtCore import QDateTime, QPointF, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QDateTime, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
     QFrame,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QComboBox,
     QProgressBar,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QTableWidget,
@@ -24,6 +25,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.network_metrics import NetworkMetricsCollector, NetworkSnapshot
+from app.core.server_config import ServerConfigManager
+from app.services.web_server import WebServerController
 from app.ui.icons import icon
 
 
@@ -211,6 +214,91 @@ class SystemCard(QFrame):
             "border-radius: 4px; padding: 1px 5px; font-size: 10px; font-weight: 700;"
         )
         self.progress.setValue(100 if available else 0)
+
+
+class ServerEndpointCard(QFrame):
+    """Dashboard server control matching the compact cyan reference card."""
+
+    start_stop_requested = Signal()
+    test_requested = Signal()
+
+    def __init__(self, server_ip: str, server_port: int, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("serverEndpointCard")
+        self.setStyleSheet(
+            "QFrame#serverEndpointCard { background: #1B1938; "
+            "border: 1px solid #3B356A; border-radius: 9px; }"
+        )
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(11, 6, 10, 6)
+        layout.setSpacing(10)
+
+        badge = QLabel()
+        badge.setPixmap(icon("server", "#8B5CF6", 23).pixmap(23, 23))
+        badge.setFixedSize(30, 30)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(badge)
+
+        labels = QVBoxLayout()
+        labels.setContentsMargins(0, 0, 0, 0)
+        labels.setSpacing(2)
+        self.endpoint = QLabel()
+        self.endpoint.setStyleSheet("color: #FFFFFF; font-size: 10px; font-weight: 700;")
+        self.url_label = QLabel()
+        self.url_label.setStyleSheet("color: #A78BFA; font-size: 9px;")
+        labels.addWidget(self.endpoint)
+        labels.addWidget(self.url_label)
+        layout.addLayout(labels)
+        layout.addStretch(1)
+
+        self.start_button = QPushButton("Start Server")
+        self.start_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.start_button.clicked.connect(self.start_stop_requested)
+        layout.addWidget(self.start_button)
+
+        self.test_button = QPushButton("Test Connection")
+        self.test_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.test_button.setStyleSheet(
+            "QPushButton { color: #C4B5FD; background: rgba(139, 92, 246, 0.10); "
+            "border: 1px solid #6C5DD3; border-radius: 5px; padding: 5px 10px; "
+            "font-size: 9px; font-weight: 700; } QPushButton:hover { background: rgba(139, 92, 246, 0.20); }"
+        )
+        self.test_button.clicked.connect(self.test_requested)
+        layout.addWidget(self.test_button)
+
+        self.setFixedSize(500, 56)
+        self.set_running(False)
+        self.set_endpoint(server_ip, server_port)
+
+    def set_endpoint(self, server_ip: str, server_port: int) -> None:
+        self.endpoint.setText(f"IP: {server_ip}     Port: {server_port}  (HTTP)")
+        self.url_label.setText(f"http://{server_ip}:{server_port}/")
+        self.setToolTip(f"Traffic Generator kết nối tới http://{server_ip}:{server_port}")
+
+    def set_running(self, running: bool, message: str = "") -> None:
+        self.start_button.setText("Stop Server" if running else "Start Server")
+        self.url_label.setStyleSheet(
+            f"color: {'#34D399' if running else '#A78BFA'}; font-size: 9px;"
+        )
+        if running:
+            style = (
+                "QPushButton { color: #FDA4AF; background: rgba(244, 63, 94, 0.10); border: 1px solid #E11D48; "
+                "border-radius: 5px; padding: 5px 10px; font-size: 9px; font-weight: 700; } "
+                "QPushButton:hover { background: rgba(244, 63, 94, 0.20); }"
+            )
+        else:
+            style = (
+                "QPushButton { color: #6EE7B7; background: rgba(16, 185, 129, 0.10); border: 1px solid #059669; "
+                "border-radius: 5px; padding: 5px 10px; font-size: 9px; font-weight: 700; } "
+                "QPushButton:hover { background: rgba(16, 185, 129, 0.20); }"
+            )
+        self.start_button.setStyleSheet(style)
+        if message:
+            self.setToolTip(message)
+
+    def set_testing(self, testing: bool) -> None:
+        self.test_button.setEnabled(not testing)
+        self.test_button.setText("Testing..." if testing else "Test Connection")
 
 
 class TrafficRangeCombo(QComboBox):
@@ -739,8 +827,15 @@ class StatusModule(QFrame):
 
 
 class DashboardPage(QScrollArea):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        server_config: ServerConfigManager | None = None,
+        web_server: WebServerController | None = None,
+    ) -> None:
         super().__init__(parent)
+        self.server_config = server_config or ServerConfigManager(parent=self)
+        self.web_server = web_server or WebServerController(parent=self)
         self.collector = NetworkMetricsCollector()
         self.setObjectName("dashboardScroll")
         self.setWidgetResizable(True)
@@ -754,7 +849,9 @@ class DashboardPage(QScrollArea):
         root.setSpacing(14)
 
         # 1. Main Page Title Header
-        header_box = QHBoxLayout()
+        header_widget = QWidget()
+        header_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        header_box = QHBoxLayout(header_widget)
         header_box.setContentsMargins(0, 0, 0, 2)
         header_box.setSpacing(10)
 
@@ -766,13 +863,22 @@ class DashboardPage(QScrollArea):
 
         subheading = QLabel("Tổng quan hoạt động của hệ thống AI-based Network IDS/IPS  •  Dữ liệu thời gian thực")
         subheading.setObjectName("dashboardSubheading")
+        subheading.setMinimumWidth(0)
+        subheading.setMaximumWidth(580)
+        subheading.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         title_box.addWidget(subheading)
-        header_box.addLayout(title_box, 1)
+        header_box.addLayout(title_box)
+        header_box.addStretch(1)
 
-        self.live_badge = QLabel("●  LIVE SYSTEM METRICS")
-        self.live_badge.setObjectName("liveBadge")
-        header_box.addWidget(self.live_badge, 0, Qt.AlignmentFlag.AlignVCenter)
-        root.addLayout(header_box)
+        endpoint = self.server_config.config
+        self.server_endpoint = ServerEndpointCard(endpoint.server_ip, endpoint.server_port)
+        self.server_endpoint.start_stop_requested.connect(self._toggle_server)
+        self.server_endpoint.test_requested.connect(self._test_server_connection)
+        self.server_config.changed.connect(self._server_config_changed)
+        self.web_server.state_changed.connect(self._server_state_changed)
+        self.web_server.test_completed.connect(self._server_test_completed)
+        header_box.addWidget(self.server_endpoint, 0, Qt.AlignmentFlag.AlignVCenter)
+        root.addWidget(header_widget)
 
         top_row = QGridLayout()
         top_row.setSpacing(12)
@@ -954,15 +1060,39 @@ class DashboardPage(QScrollArea):
         self.live_timer.timeout.connect(self.refresh_live_data)
         self.live_timer.start(1000)
 
+    def _toggle_server(self) -> None:
+        if self.web_server.is_running:
+            self.web_server.stop()
+            return
+        config = self.server_config.config
+        self.web_server.start(config.server_ip, config.server_port)
+
+    def _test_server_connection(self) -> None:
+        config = self.server_config.config
+        self.server_endpoint.set_testing(True)
+        self.web_server.test_connection(config.server_ip, config.server_port)
+
+    def _server_config_changed(self, server_ip: str, server_port: int) -> None:
+        if self.web_server.is_running:
+            self.web_server.stop()
+        self.server_endpoint.set_endpoint(server_ip, server_port)
+
+    def _server_state_changed(self, running: bool, message: str) -> None:
+        self.server_endpoint.set_running(running, message)
+
+    def _server_test_completed(self, success: bool, message: str) -> None:
+        self.server_endpoint.set_testing(False)
+        self.server_endpoint.setToolTip(message)
+        color = "#34D399" if success else "#FF5B79"
+        self.server_endpoint.url_label.setStyleSheet(f"color: {color}; font-size: 9px; font-weight: 700;")
+
     def refresh_live_data(self) -> None:
         snapshot = self.collector.sample()
         self.system_card.set_available(snapshot.available)
         if not snapshot.available:
-            self.live_badge.setText("●  KHÔNG CÓ DỮ LIỆU HỆ THỐNG")
             self.speed_badge.setText("— Mbps")
             return
 
-        self.live_badge.setText("●  LIVE SYSTEM METRICS")
         total_mbps = snapshot.incoming_mbps + snapshot.outgoing_mbps
         self.speed_badge.setText(f"{total_mbps:.2f} Mbps")
         self.traffic_chart.append_sample(snapshot.incoming_mbps, snapshot.outgoing_mbps)

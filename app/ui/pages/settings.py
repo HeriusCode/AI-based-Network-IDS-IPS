@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
+from PySide6.QtGui import QColor, QFont, QIntValidator, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.server_config import ServerConfigManager, local_ipv4_addresses, primary_local_ipv4
 from app.ui.icons import icon
 
 
@@ -289,8 +290,13 @@ def make_page(card_left: QWidget, card_right: QWidget, ratio_left: int = 1, rati
 class SettingsPage(QScrollArea):
     """System settings page with modular tab views driven by category buttons."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        server_config: ServerConfigManager | None = None,
+    ) -> None:
         super().__init__(parent)
+        self.server_config = server_config or ServerConfigManager(parent=self)
         self.setObjectName("settingsScroll")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -401,18 +407,19 @@ class SettingsPage(QScrollArea):
         save.setObjectName("saveSettingsButton")
         save.setIcon(icon("save", "#FFFFFF", 15))
         save.setCursor(Qt.CursorShape.PointingHandCursor)
-        save.clicked.connect(lambda: self.show_status("✓ Đã lưu cấu hình hệ thống thành công!", True))
+        save.clicked.connect(self.save_server_settings)
         footer.addWidget(save)
 
         apply = QPushButton("  Áp dụng")
         apply.setObjectName("applySettingsButton")
         apply.setIcon(icon("check", "#FFFFFF", 15))
         apply.setCursor(Qt.CursorShape.PointingHandCursor)
-        apply.clicked.connect(lambda: self.show_status("✓ Đã áp dụng cấu hình thời gian thực lên SDN & AI Engine!", True))
+        apply.clicked.connect(self.apply_server_settings)
         footer.addWidget(apply)
 
         root.addLayout(footer)
         self.setWidget(content)
+        self.server_config.changed.connect(self._load_server_endpoint)
 
     # -------------------------------------------------------------------------
     # TAB SWITCHING LOGIC
@@ -616,6 +623,42 @@ class SettingsPage(QScrollArea):
     # TAB 2: KẾT NỐI HỆ THỐNG (SYSTEM CONNECTIVITY)
     # -------------------------------------------------------------------------
     def _page_connection(self) -> QWidget:
+        # Server endpoint advertised to Traffic Generator clients.
+        endpoint = self.server_config.config
+        server_card = SettingsCard(
+            "Máy chủ AI-based Network IDS/IPS",
+            "server",
+            "#3B82F6",
+            "Địa chỉ API mà máy Traffic Generator sử dụng để kết nối tới hệ thống",
+        )
+
+        detect_button = QPushButton("  Tự động lấy IP")
+        detect_button.setObjectName("connectionTestButton")
+        detect_button.setIcon(icon("refresh", "#60A5FA", 14))
+        detect_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        detect_button.clicked.connect(self._use_detected_server_ip)
+        self.server_ip = input_field(endpoint.server_ip, "Ví dụ: 192.168.1.20")
+        server_group = QWidget()
+        server_layout = QHBoxLayout(server_group)
+        server_layout.setContentsMargins(0, 0, 0, 0)
+        server_layout.setSpacing(8)
+        server_layout.addWidget(self.server_ip, 1)
+        server_layout.addWidget(detect_button)
+        server_card.add_row("Server IP", server_group)
+        self.server_port = input_field(str(endpoint.server_port), "1–65535")
+        self.server_port.setValidator(QIntValidator(1, 65535, self.server_port))
+        server_card.add_row("Server API Port", self.server_port)
+
+        self.server_url = input_field(endpoint.base_url)
+        self.server_url.setReadOnly(True)
+        server_card.add_row("API Base URL", self.server_url)
+        self.server_ip.textChanged.connect(self._sync_server_url)
+        self.server_port.textChanged.connect(self._sync_server_url)
+
+        server_hint = QLabel("● Endpoint này được hiển thị trên Dashboard và lưu trong server_config.json")
+        server_hint.setStyleSheet("color: #60A5FA; font-size: 11.5px; font-weight: 600;")
+        server_card.box.addWidget(server_hint)
+
         # Card 1: Ryu SDN Controller
         card1 = SettingsCard(
             "Kết nối SDN Controller (Ryu / OpenFlow)",
@@ -662,13 +705,9 @@ class SettingsPage(QScrollArea):
         self.db_retry_interval = combo(["5 giây", "10 giây (Khuyên dùng)", "30 giây", "1 phút"])
         card2.add_row("Khoảng thời gian thử lại", self.db_retry_interval)
 
-        self.db_timeout = QSpinBox()
-        self.db_timeout.setObjectName("settingsSpin")
-        self.db_timeout.setRange(1000, 30000)
-        self.db_timeout.setSingleStep(500)
-        self.db_timeout.setValue(5000)
-        self.db_timeout.setSuffix(" ms")
-        card2.add_row("Thời gian chờ tối đa (Timeout)", self.db_timeout)
+        self.db_timeout = input_field("5000", "1000–30000")
+        self.db_timeout.setValidator(QIntValidator(1000, 30000, self.db_timeout))
+        card2.add_row("Thời gian chờ tối đa (ms)", self.db_timeout)
 
         test_db_btn = QPushButton("  Kiểm tra kết nối Database")
         test_db_btn.setObjectName("connectionTestButton")
@@ -682,7 +721,18 @@ class SettingsPage(QScrollArea):
         card2.add_row("Trạng thái CSDL", self.db_status_lbl, 0)
         card2.box.addStretch(1)
 
-        return make_page(card1, card2)
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 4, 0, 4)
+        page_layout.setSpacing(16)
+        page_layout.addWidget(server_card)
+        lower_cards = QHBoxLayout()
+        lower_cards.setSpacing(16)
+        lower_cards.addWidget(card1, 1)
+        lower_cards.addWidget(card2, 1)
+        page_layout.addLayout(lower_cards)
+        page_layout.addStretch(1)
+        return page
 
     # -------------------------------------------------------------------------
     # TAB 3: GIÁM SÁT MẠNG (NETWORK MONITORING)
@@ -933,6 +983,38 @@ class SettingsPage(QScrollArea):
     # -------------------------------------------------------------------------
     # FEEDBACK & TEST ACTIONS
     # -------------------------------------------------------------------------
+    def _sync_server_url(self, *_args) -> None:
+        if hasattr(self, "server_url"):
+            port = self.server_port.text().strip()
+            self.server_url.setText(f"http://{self.server_ip.text().strip()}:{port}")
+
+    def _use_detected_server_ip(self) -> None:
+        addresses = local_ipv4_addresses()
+        detected = addresses[0]
+        self.server_ip.setText(detected)
+        self.server_ip.setToolTip("Các IPv4 phát hiện được:\n" + "\n".join(addresses))
+        self.show_status(f"✓ Đã tự động lấy IP máy: {detected}", True)
+
+    def _load_server_endpoint(self, server_ip: str, server_port: int) -> None:
+        if hasattr(self, "server_ip"):
+            self.server_ip.setText(server_ip)
+            self.server_port.setText(str(server_port))
+            self._sync_server_url()
+
+    def save_server_settings(self) -> None:
+        try:
+            port_text = self.server_port.text().strip()
+            if not port_text:
+                raise ValueError("Server API Port không được để trống.")
+            config = self.server_config.save(self.server_ip.text(), int(port_text))
+        except (OSError, ValueError) as exc:
+            self.show_status(f"✕ Không thể lưu IP/port server: {exc}", False)
+            return
+        self.show_status(f"✓ Đã lưu IDS/IPS Server tại {config.server_ip}:{config.server_port}", True)
+
+    def apply_server_settings(self) -> None:
+        self.save_server_settings()
+
     def _test_ryu_conn(self) -> None:
         self.ryu_status_lbl.setText("⏳ Đang ping Ryu Controller...")
         self.ryu_status_lbl.setStyleSheet("color: #FBBF24; font-size: 12.5px; font-weight: 600;")
@@ -968,6 +1050,8 @@ class SettingsPage(QScrollArea):
     def restore_defaults(self) -> None:
         self.app_name_input.setText("AI Network IDS/IPS Platform")
         self.version_input.setText("v1.2.0 (Cybera SOC Edition)")
+        self.server_ip.setText(primary_local_ipv4())
+        self.server_port.setText("8000")
         self.lang_combo.setCurrentIndex(0)
         self.autostart_toggle.setChecked(True)
         self.autoupdate_toggle.setChecked(True)

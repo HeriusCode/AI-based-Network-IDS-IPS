@@ -12,7 +12,6 @@ from app.ui.auth_window import AuthWindow
 from app.ui.icons import icon
 from app.ui.main_window import MainWindow
 
-
 def main() -> int:
     # Attempt to initialize PostgreSQL tables and default administrator
     db_ok, db_msg = init_db()

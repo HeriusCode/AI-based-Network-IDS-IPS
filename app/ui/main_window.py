@@ -8,6 +8,7 @@ from app.core.config import WINDOW_TITLE
 from app.core.navigation import NAV_ITEMS
 from app.core.server_config import ServerConfigManager
 from app.services.web_server import WebServerController
+from app.services.mitigation_service import MitigationService
 from app.ui.dialogs import LogoutConfirmDialog
 from app.ui.pages.dashboard import DashboardPage
 from app.ui.pages.alerts import AlertsPage
@@ -51,6 +52,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.server_config_manager = ServerConfigManager(parent=self)
         self.web_server = WebServerController(parent=self)
+        self.mitigation_service = MitigationService(parent=self)
+        self.web_server.live_service.changed.connect(self.mitigation_service.evaluate_async)
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setWindowTitle(WINDOW_TITLE)
         self.resize(1536, 960)
@@ -90,13 +93,20 @@ class MainWindow(QMainWindow):
                 web_server=self.web_server,
             ),
             "monitoring": MonitoringPage,
-            "detection": DetectionPage,
-            "prediction": PredictionPage,
-            "mitigation": MitigationPage,
+            "detection": lambda: DetectionPage(
+                live_service=self.web_server.live_service,
+                mitigation_service=self.mitigation_service,
+            ),
+            "prediction": lambda: PredictionPage(live_service=self.web_server.live_service),
+            "mitigation": lambda: MitigationPage(mitigation_service=self.mitigation_service),
             "topology": TopologyPage,
             "alerts": AlertsPage,
             "reports": ReportsPage,
-            "settings": lambda: SettingsPage(server_config=self.server_config_manager),
+            "settings": lambda: SettingsPage(
+                server_config=self.server_config_manager,
+                mitigation_service=self.mitigation_service,
+                web_server=self.web_server,
+            ),
         }
         for item in NAV_ITEMS:
             if item.key == "dashboard":
@@ -104,6 +114,11 @@ class MainWindow(QMainWindow):
                     server_config=self.server_config_manager,
                     web_server=self.web_server,
                 )
+                self._loaded_pages[item.key] = page
+            elif item.key == "settings":
+                # Load auto-DHCP monitoring immediately after login, even if the
+                # user never opens the Settings tab.
+                page = self._page_factories[item.key]()
                 self._loaded_pages[item.key] = page
             elif item.key in self._page_factories:
                 page = QWidget()
@@ -204,4 +219,5 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.web_server.is_running:
             self.web_server.stop()
+        self.mitigation_service.close()
         super().closeEvent(event)

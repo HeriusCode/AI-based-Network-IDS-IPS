@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime
 
 from PySide6.QtCore import QThreadPool, Qt
@@ -29,6 +30,8 @@ from PySide6.QtWidgets import (
 from app.ui.icons import icon
 from app.services.ai_client import AiClient
 from app.services.detection_pipeline import AiHealthWorker, DetectionCsvWorker
+from app.services.live_detection import LiveDetectionService
+from app.services.mitigation_service import MitigationService
 from app.ui.pages.dashboard import (
     DonutChart,
     make_badge_cell,
@@ -44,8 +47,13 @@ ATTACK_DESCRIPTIONS: dict[str, str] = {}
 
 
 class DetectionPage(QScrollArea):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, live_service: LiveDetectionService | None = None,
+                 mitigation_service: MitigationService | None = None) -> None:
         super().__init__(parent)
+        self.live_service = live_service
+        self.mitigation_service = mitigation_service
+        self._selected_detection: list[str] | None = None
+        self._live_trend: deque[list[int]] = deque(maxlen=32)
         self.ai_client = AiClient(timeout=45.0)
         self.thread_pool = QThreadPool.globalInstance()
         self._csv_worker: DetectionCsvWorker | None = None
@@ -186,15 +194,21 @@ class DetectionPage(QScrollArea):
         attack_legend = QVBoxLayout()
         attack_legend.setSpacing(3)
         attack_legend.addStretch(1)
-        for color, name in [
-            ("#FF5B79", "DDoS"),
-            ("#FB923C", "Port Scan"),
-            ("#60A5FA", "Brute Force"),
-            ("#C084FC", "SQL Injection"),
-            ("#FACC15", "Malware"),
-            ("#10B981", "Protocol"),
-        ]:
-            attack_legend.addWidget(protocol_bar_row(color, name, "0.0%", 0.0))
+        self.attack_specs = [
+            ("DoS", "#FF5B79"),
+            ("DDoS", "#FB923C"),
+            ("Port Scan", "#60A5FA"),
+            ("Brute Force", "#C084FC"),
+            ("Web Attack", "#F472B6"),
+            ("Botnet", "#2DD4BF"),
+            ("Infiltration", "#FACC15"),
+            ("Chưa xác định", "#94A3B8"),
+        ]
+        self.attack_rows = {}
+        for name, color in self.attack_specs:
+            row = protocol_bar_row(color, name, "0.0%", 0.0)
+            self.attack_rows[name] = row
+            attack_legend.addWidget(row)
         attack_legend.addStretch(1)
         attack_body.addLayout(attack_legend, 1)
         attack_panel.box.addLayout(attack_body, 1)
@@ -219,6 +233,12 @@ class DetectionPage(QScrollArea):
 
         self.setWidget(content)
         self.check_ai_health()
+        if self.live_service is not None:
+            self.live_service.changed.connect(self._live_changed)
+            if self.live_service.snapshot():
+                self._live_changed({})
+        if self.mitigation_service is not None:
+            self.mitigation_service.action_completed.connect(self._mitigation_completed)
 
     def _detections_panel(self) -> Panel:
         self.detection_badge = QLabel("0 phát hiện")
@@ -229,8 +249,8 @@ class DetectionPage(QScrollArea):
             "border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 2px 7px; font-size: 11px; font-weight: 700;"
         )
         panel = Panel(
-            "Danh sách các lưu lượng bất thường được phát hiện",
-            "Nhật ký các luồng mạng bị mô hình AI gắn cờ cảnh báo rủi ro",
+            "Danh sách flow được AI phân tích",
+            "Hiển thị flow bình thường và flow bị model gắn cờ cảnh báo",
             badge,
         )
 
@@ -248,13 +268,14 @@ class DetectionPage(QScrollArea):
         combo_attack.setObjectName("detectionCombo")
         combo_attack.addItems([
             "Tất cả loại tấn công",
-            "DDoS Attack",
+            "DoS",
+            "DDoS",
             "Port Scan",
             "Brute Force",
-            "SQL Injection",
-            "Malware Traffic",
-            "Protocol Anomaly",
-            "Suspicious Traffic",
+            "Web Attack",
+            "Botnet",
+            "Infiltration",
+            "Chưa xác định",
         ])
         toolbar.addWidget(combo_attack)
 
@@ -355,13 +376,14 @@ class DetectionPage(QScrollArea):
         self.proto_colors = proto_colors
 
         attack_colors = {
-            "DDoS Attack": ("rgba(255, 91, 121, 0.18)", "#FF5B79", "rgba(255, 91, 121, 0.35)"),
-            "Port Scan": ("rgba(249, 115, 22, 0.18)", "#FB923C", "rgba(249, 115, 22, 0.35)"),
-            "Brute Force": ("rgba(59, 130, 246, 0.18)", "#60A5FA", "rgba(59, 130, 246, 0.35)"),
-            "SQL Injection": ("rgba(168, 85, 247, 0.18)", "#C084FC", "rgba(168, 85, 247, 0.35)"),
-            "Malware Traffic": ("rgba(234, 179, 8, 0.18)", "#FACC15", "rgba(234, 179, 8, 0.35)"),
-            "Protocol Anomaly": ("rgba(236, 72, 153, 0.18)", "#F472B6", "rgba(236, 72, 153, 0.35)"),
-            "Suspicious Traffic": ("rgba(20, 184, 166, 0.18)", "#2DD4BF", "rgba(20, 184, 166, 0.35)"),
+            "DoS": ("rgba(255, 91, 121, 0.18)", "#FF5B79", "rgba(255, 91, 121, 0.35)"),
+            "DDoS": ("rgba(249, 115, 22, 0.18)", "#FB923C", "rgba(249, 115, 22, 0.35)"),
+            "Port Scan": ("rgba(59, 130, 246, 0.18)", "#60A5FA", "rgba(59, 130, 246, 0.35)"),
+            "Brute Force": ("rgba(168, 85, 247, 0.18)", "#C084FC", "rgba(168, 85, 247, 0.35)"),
+            "Web Attack": ("rgba(236, 72, 153, 0.18)", "#F472B6", "rgba(236, 72, 153, 0.35)"),
+            "Botnet": ("rgba(20, 184, 166, 0.18)", "#2DD4BF", "rgba(20, 184, 166, 0.35)"),
+            "Infiltration": ("rgba(234, 179, 8, 0.18)", "#FACC15", "rgba(234, 179, 8, 0.35)"),
+            "Chưa xác định": ("rgba(148, 163, 184, 0.18)", "#94A3B8", "rgba(148, 163, 184, 0.35)"),
         }
         self.attack_colors = attack_colors
 
@@ -731,7 +753,7 @@ class DetectionPage(QScrollArea):
         for alert in result["alerts"]:
             record = alert["record"]
             alert_id = str(alert["id"])
-            attack_type = str(alert["attack_type"])
+            attack_type = self._attack_family(str(alert["attack_type"]))
             time_text = self._record_value(record, "Timestamp", "timestamp")
             source_ip = self._record_value(record, "Source IP", "Src IP", "source_ip")
             destination_ip = self._record_value(record, "Destination IP", "Dst IP", "destination_ip")
@@ -778,14 +800,11 @@ class DetectionPage(QScrollArea):
             self.trend_chart.maximum = max(1, int(max(max(item) for item in points) * 1.2))
             self.trend_chart.update()
 
-        palette = ["#FF5B79", "#FB923C", "#60A5FA", "#C084FC", "#FACC15", "#10B981"]
-        type_counts = result.get("attack_types", {})
-        segments = [
-            (count * 100.0 / max(1, attack), palette[index % len(palette)])
-            for index, count in enumerate(type_counts.values())
-        ]
-        self.attack_donut.set_data(segments, str(attack), "phát hiện")
-        self.attack_badge.setText(f"{len(type_counts)} loại")
+        type_counts: dict[str, int] = {}
+        for name, count in result.get("attack_types", {}).items():
+            family = self._attack_family(str(name))
+            type_counts[family] = type_counts.get(family, 0) + int(count)
+        self._update_attack_breakdown(type_counts, attack)
         self.detection_badge.setText(f"{attack:,} phát hiện")
         visible = len(result["alerts"])
         cap_note = f"; hiển thị {visible:,}" if visible < attack else ""
@@ -797,13 +816,116 @@ class DetectionPage(QScrollArea):
         self.import_button.setEnabled(True)
         self.import_button.setText("  Chọn CSV kiểm thử")
 
+    def _live_changed(self, _flow: dict) -> None:
+        if self.live_service is None:
+            return
+        flows = self.live_service.snapshot()
+        DETECTIONS.clear()
+        PORT_MAPPINGS.clear()
+        ATTACK_DESCRIPTIONS.clear()
+        benign = attack = high = 0
+        score_sum = 0.0
+        type_counts: dict[str, int] = {}
+        risk_names = {"HIGH": "Cao", "MEDIUM": "Trung bình", "LOW": "Thấp"}
+        for index, flow in enumerate(flows):
+            is_attack = flow.get("label") == "ATTACK"
+            attack += int(is_attack)
+            benign += int(not is_attack)
+            high += int(is_attack and flow.get("risk_level") == "HIGH")
+            score = float(flow.get("attack_score", 0.0))
+            score_sum += score
+            attack_type = self._attack_family(str(flow.get("attack_type") or "Chưa xác định")) if is_attack else "Bình thường"
+            if is_attack:
+                type_counts[attack_type] = type_counts.get(attack_type, 0) + 1
+            alert_id = f"LIVE-{index + 1:04d}"
+            DETECTIONS.append([
+                alert_id,
+                str(flow.get("timestamp", ""))[11:19],
+                str(flow.get("source_ip", "")),
+                str(flow.get("destination_ip", "")),
+                str(flow.get("protocol", "")),
+                attack_type,
+                f"{score * 100:.1f}%",
+                risk_names.get(str(flow.get("risk_level", "LOW")), "Thấp"),
+                "Đang giám sát",
+            ])
+            PORT_MAPPINGS[alert_id] = (
+                str(flow.get("source_port", 0)), str(flow.get("destination_port", 0)),
+            )
+            if is_attack:
+                ATTACK_DESCRIPTIONS[attack_type] = (
+                    f"Flow Mininet được model gắn cờ với score {score:.3f}. "
+                    "Đặc trưng trích từ packet đang chạy là xấp xỉ CICFlowMeter."
+                )
+        self._populate_detection_table()
+        total = len(flows)
+        values = (
+            (f"{attack:,}", "AI live", attack),
+            (f"{benign:,}", "Mininet", benign),
+            (f"{attack:,}", "Mininet", attack),
+            (f"{score_sum / max(1, total):.1%}", "Score TB", score_sum * 100 / max(1, total)),
+            (f"{high:,}", "HIGH", high),
+        )
+        for card, (value, change, spark) in zip(self.metric_cards, values):
+            card.set_data(value, change, float(spark))
+        self._live_trend.append([benign, attack])
+        points = [[0, 0]] * (32 - len(self._live_trend)) + list(self._live_trend)
+        self.trend_chart.series[0][0][:] = [item[0] for item in points]
+        self.trend_chart.series[1][0][:] = [item[1] for item in points]
+        self.trend_chart.maximum = max(1, int(max(max(item) for item in points) * 1.2))
+        self.trend_chart.update()
+        self._update_attack_breakdown(type_counts, attack)
+        self.detection_badge.setText(f"{attack:,} phát hiện")
+        model = str(flows[0].get("model_version", "unknown")) if flows else "unknown"
+        self.result_count.setText(
+            f"Live Mininet: {total:,} flow · model {model} · đặc trưng xấp xỉ CICFlowMeter"
+        )
+        self.ai_badge.setText("●  AI ONLINE · FLOW LIVE TỪ MININET")
+
+    @staticmethod
+    def _attack_family(label: str) -> str:
+        normalized = label.strip().upper().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "DOS": "DoS",
+            "SYN_FLOOD": "DoS",
+            "CONNECTION_BURST": "DoS",
+            "DDOS": "DDoS",
+            "DDOS_ATTACK": "DDoS",
+            "UDP_FLOOD": "DDoS",
+            "ICMP_FLOOD": "DDoS",
+            "PORT_SCAN": "Port Scan",
+            "BRUTE_FORCE": "Brute Force",
+            "WEB_ATTACK": "Web Attack",
+            "BOTNET": "Botnet",
+            "INFILTRATION": "Infiltration",
+        }
+        return aliases.get(normalized, "Chưa xác định")
+
+    def _update_attack_breakdown(self, counts: dict[str, int], total: int) -> None:
+        denominator = max(1, total)
+        colors = dict(self.attack_specs)
+        segments = []
+        visible_types = 0
+        for name, _color in self.attack_specs:
+            count = int(counts.get(name, 0))
+            percent = count * 100.0 / denominator
+            if count:
+                visible_types += 1
+                segments.append((percent, colors[name]))
+            row = self.attack_rows[name]
+            row.value_label.setText(f"{percent:.1f}%")
+            row.progress_bar.setValue(round(percent))
+        self.attack_donut.set_data(segments, str(total), "phát hiện")
+        self.attack_badge.setText(f"{visible_types} loại")
+
     def update_detail(self, row: int) -> None:
         if row < 0 or row >= len(DETECTIONS):
             self.show_empty_detail()
             return
         item = DETECTIONS[row]
         attack_type = item[5]
-        self.detail_alert.setText(f"⚠  {item[0]} - {attack_type}")
+        marker = "✓" if attack_type == "Bình thường" else "⚠"
+        self.detail_alert.setText(f"{marker}  {item[0]} - {attack_type}")
         self.detail_fields["time"].setText(item[1])
         self.detail_fields["source"].setText(item[2])
         self.detail_fields["destination"].setText(item[3])
@@ -841,10 +963,17 @@ class DetectionPage(QScrollArea):
         self.confidence.setValue(int(pct_val * 10))
 
         # Dynamic description
-        self.description.setText(ATTACK_DESCRIPTIONS.get(attack_type, "Không có mô tả phân tích từ mô hình AI."))
+        if attack_type == "Bình thường":
+            self.description.setText(
+                f"Flow này được model phân loại bình thường với attack score {pct_val:.1f}%. "
+                "Đặc trưng live xấp xỉ CICFlowMeter."
+            )
+        else:
+            self.description.setText(ATTACK_DESCRIPTIONS.get(attack_type, "Không có mô tả phân tích từ mô hình AI."))
 
         self.block_button.setText("  Chặn IP")
-        self.block_button.setEnabled(True)
+        self._selected_detection = item
+        self.block_button.setEnabled(attack_type != "Bình thường" and self.mitigation_service is not None)
 
     def show_empty_detail(self) -> None:
         self.detail_alert.setText("Chưa có phát hiện bất thường")
@@ -855,10 +984,23 @@ class DetectionPage(QScrollArea):
         self.description.setText("Chưa có dữ liệu phân tích từ mô hình AI.")
         self.block_button.setText("  Chặn IP")
         self.block_button.setEnabled(False)
+        self._selected_detection = None
 
     def simulate_block(self) -> None:
-        self.block_button.setText("  Đã chặn")
+        if self.mitigation_service is None or self._selected_detection is None:
+            return
+        source_ip = self._selected_detection[2]
+        attack_type = self._selected_detection[5]
+        self.mitigation_service.block_ip_async(source_ip, reason=f"Analyst confirmed {attack_type}")
+        self.block_button.setText("  Đang gửi OS-Ken...")
         self.block_button.setEnabled(False)
+
+    def _mitigation_completed(self, success: bool, message: str) -> None:
+        if self._selected_detection is None:
+            return
+        self.block_button.setText("  Đã chặn" if success else "  Chặn thất bại")
+        self.block_button.setToolTip(message)
+        self.block_button.setEnabled(not success)
 
     def refresh_data(self) -> None:
         DETECTIONS.clear()

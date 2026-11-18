@@ -580,7 +580,9 @@ def protocol_bar_row(color: str, label: str, value: str, percent: float) -> QWid
 
     name = QLabel(label)
     name.setObjectName("legendLabel")
-    name.setFixedWidth(40)
+    # Long attack families such as "Brute Force" and "Chưa xác định" must not
+    # be truncated in the shared legend used by DetectionPage.
+    name.setFixedWidth(86)
     name.setStyleSheet("color: #CBD5E1; font-weight: 600; font-size: 11px;")
     layout.addWidget(name)
 

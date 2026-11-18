@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIntValidator, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
     QComboBox,
@@ -24,7 +24,25 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.server_config import ServerConfigManager, local_ipv4_addresses, primary_local_ipv4
+from app.services.mitigation_service import MitigationService
+from app.services.network_discovery import (
+    NetworkDiscoveryResult,
+    discover_network,
+    sync_traffic_generator_config,
+)
+from app.services.web_server import WebServerController
 from app.ui.icons import icon
+
+
+class NetworkDiscoveryWorker(QThread):
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def run(self) -> None:
+        try:
+            self.completed.emit(discover_network())
+        except Exception as error:
+            self.failed.emit(str(error))
 
 
 class ToggleButton(QPushButton):
@@ -294,9 +312,14 @@ class SettingsPage(QScrollArea):
         self,
         parent: QWidget | None = None,
         server_config: ServerConfigManager | None = None,
+        mitigation_service: MitigationService | None = None,
+        web_server: WebServerController | None = None,
     ) -> None:
         super().__init__(parent)
         self.server_config = server_config or ServerConfigManager(parent=self)
+        self.mitigation_service = mitigation_service
+        self.web_server = web_server
+        self.network_worker: NetworkDiscoveryWorker | None = None
         self.setObjectName("settingsScroll")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -319,7 +342,7 @@ class SettingsPage(QScrollArea):
         title.setObjectName("settingsHeading")
         intro.addWidget(title)
 
-        subtitle = QLabel("Quản lý cấu hình toàn diện, tham số mô hình AI, kết nối SDN Controller và chính sách an ninh mạng")
+        subtitle = QLabel("Quản lý cấu hình, tự nhận diện địa chỉ DHCP của IDS/IPS và Mininet VM, cùng chính sách an ninh mạng")
         subtitle.setObjectName("settingsSubtitle")
         subtitle.setWordWrap(True)
         intro.addWidget(subtitle)
@@ -420,6 +443,11 @@ class SettingsPage(QScrollArea):
         root.addLayout(footer)
         self.setWidget(content)
         self.server_config.changed.connect(self._load_server_endpoint)
+        self.network_timer = QTimer(self)
+        self.network_timer.setInterval(30_000)
+        self.network_timer.timeout.connect(self._auto_discover_network)
+        self.network_timer.start()
+        QTimer.singleShot(500, self._auto_discover_network)
 
     # -------------------------------------------------------------------------
     # TAB SWITCHING LOGIC
@@ -463,7 +491,7 @@ class SettingsPage(QScrollArea):
         self.desc_text = QTextEdit(
             "Hệ thống giám sát lưu lượng SDN thời gian thực, phát hiện bất thường bằng học máy "
             "(Random Forest / Isolation Forest), dự báo lưu lượng chuỗi thời gian (LSTM) "
-            "và tự động thực thi chính sách giảm thiểu rủi ro IPS trên Ryu Controller."
+            "và tự động thực thi chính sách giảm thiểu rủi ro IPS qua OS-Ken và Open vSwitch."
         )
         self.desc_text.setObjectName("settingsText")
         self.desc_text.setFixedHeight(72)
@@ -512,7 +540,7 @@ class SettingsPage(QScrollArea):
         card2.box.addWidget(make_status_row("Mô hình phát hiện AI (IDS)", "● Đang hoạt động (98.5% SLA)", "#10B981"))
         card2.box.addWidget(make_status_row("Mô hình dự đoán lưu lượng", "● LSTM Engine Active", "#8B5CF6"))
         card2.box.addWidget(make_status_row("Cơ chế giảm thiểu IPS", "● 82 Flow Rules Enforced", "#F59E0B"))
-        card2.box.addWidget(make_status_row("Ryu SDN Controller", "● Kết nối trực tuyến (1.2ms)", "#3B82F6"))
+        card2.box.addWidget(make_status_row("OS-Ken / Open vSwitch", "● Quản lý tự động trong Mininet VM", "#3B82F6"))
         card2.box.addWidget(make_status_row("Cơ sở dữ liệu PostgreSQL", "● Đã đồng bộ 5,281 logs", "#10B981"))
 
         card2.box.addSpacing(6)
@@ -659,34 +687,35 @@ class SettingsPage(QScrollArea):
         server_hint.setStyleSheet("color: #60A5FA; font-size: 11.5px; font-weight: 600;")
         server_card.box.addWidget(server_hint)
 
-        # Card 1: Ryu SDN Controller
+        # Card 1: automatic DHCP discovery and cross-application synchronization.
         card1 = SettingsCard(
-            "Kết nối SDN Controller (Ryu / OpenFlow)",
+            "Tự động cấu hình kết nối DHCP",
             "nodes",
             "#60A5FA",
-            "Cấu hình giao tiếp điều khiển mạng OpenFlow 1.3",
+            "Tự tìm IP máy IDS và Mininet VM, sau đó đồng bộ sang Traffic Generator",
         )
-        self.ryu_ip = input_field("192.168.1.10")
-        card1.add_row("Địa chỉ IP Controller", self.ryu_ip)
-        self.ryu_port = input_field("8080")
-        card1.add_row("Cổng REST API", self.ryu_port)
-        self.openflow_port = input_field("6653")
-        card1.add_row("Cổng OpenFlow Switch", self.openflow_port)
-        self.ryu_proto = combo(["REST API / HTTP", "gRPC / Protobuf", "WebSocket Stream"])
-        card1.add_row("Giao thức kết nối", self.ryu_proto)
-        self.ryu_autosync = ToggleButton(True)
-        card1.add_row("Tự động đồng bộ Switch topology", self.ryu_autosync, 0)
+        self.auto_dhcp_toggle = ToggleButton(True)
+        card1.add_row("Theo dõi thay đổi DHCP mỗi 30 giây", self.auto_dhcp_toggle, 0)
+        self.detected_server_ip = input_field(endpoint.server_ip)
+        self.detected_server_ip.setReadOnly(True)
+        card1.add_row("IP máy IDS/IPS", self.detected_server_ip)
+        self.detected_vm_ip = input_field("Đang phát hiện...")
+        self.detected_vm_ip.setReadOnly(True)
+        card1.add_row("IP Mininet VM", self.detected_vm_ip)
+        self.vm_identity = input_field("duy-server · SSH key · agent 9000")
+        self.vm_identity.setReadOnly(True)
+        card1.add_row("Nhận diện VM", self.vm_identity)
 
-        test_btn = QPushButton("  Kiểm tra kết nối Ryu Controller")
-        test_btn.setObjectName("connectionTestButton")
-        test_btn.setIcon(icon("refresh", "#A78BFA", 14))
-        test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        test_btn.clicked.connect(self._test_ryu_conn)
-        card1.box.addWidget(test_btn, 0, Qt.AlignmentFlag.AlignRight)
+        self.network_detect_button = QPushButton("  Phát hiện & đồng bộ ngay")
+        self.network_detect_button.setObjectName("connectionTestButton")
+        self.network_detect_button.setIcon(icon("refresh", "#A78BFA", 14))
+        self.network_detect_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.network_detect_button.clicked.connect(self._discover_network)
+        card1.box.addWidget(self.network_detect_button, 0, Qt.AlignmentFlag.AlignRight)
 
-        self.ryu_status_lbl = QLabel("● Đang kết nối trực tuyến (Ping: 1.2ms)")
-        self.ryu_status_lbl.setObjectName("connectionStatus")
-        card1.add_row("Trạng thái Ryu", self.ryu_status_lbl, 0)
+        self.network_status_lbl = QLabel("● Chưa kiểm tra kết nối DHCP")
+        self.network_status_lbl.setObjectName("connectionStatus")
+        card1.add_row("Trạng thái tự cấu hình", self.network_status_lbl, 0)
         card1.box.addStretch(1)
 
         # Card 2: Database & Backend
@@ -963,7 +992,7 @@ class SettingsPage(QScrollArea):
             "Tự động hóa nạp flow rule và kiểm toán can thiệp",
         )
         self.ips_autosync_toggle = ToggleButton(True)
-        card2.add_row("Tự động đẩy Flow Rule xuống Ryu Switch", self.ips_autosync_toggle, 0)
+        card2.add_row("Tự động đẩy Flow Rule xuống OS-Ken/OVS", self.ips_autosync_toggle, 0)
         self.ips_priority_combo = combo(["P1 (Ưu tiên cao nhất - 65535)", "P2 (Ưu tiên trung bình)", "P3 (Thấp)"])
         card2.add_row("Mức ưu tiên rule mặc định", self.ips_priority_combo)
         self.ips_confirm_unlock_toggle = ToggleButton(True)
@@ -1015,15 +1044,65 @@ class SettingsPage(QScrollArea):
     def apply_server_settings(self) -> None:
         self.save_server_settings()
 
-    def _test_ryu_conn(self) -> None:
-        self.ryu_status_lbl.setText("⏳ Đang ping Ryu Controller...")
-        self.ryu_status_lbl.setStyleSheet("color: #FBBF24; font-size: 12.5px; font-weight: 600;")
-        QTimer.singleShot(600, self._ryu_success)
+    def _auto_discover_network(self) -> None:
+        if hasattr(self, "auto_dhcp_toggle") and self.auto_dhcp_toggle.isChecked():
+            self._discover_network()
 
-    def _ryu_success(self) -> None:
-        self.ryu_status_lbl.setText("● Kết nối Ryu Controller thành công (1.2ms)")
-        self.ryu_status_lbl.setStyleSheet("color: #34D399; font-size: 12.5px; font-weight: 600;")
-        self.show_status("✓ Đã kết nối thành công tới Ryu SDN Controller!", True)
+    def _discover_network(self) -> None:
+        if self.network_worker is not None and self.network_worker.isRunning():
+            return
+        self.network_detect_button.setEnabled(False)
+        self.network_status_lbl.setText("⏳ Đang đọc DHCP lease và xác thực SSH tới Mininet VM...")
+        self.network_status_lbl.setStyleSheet("color: #FBBF24; font-size: 12.5px; font-weight: 600;")
+        worker = NetworkDiscoveryWorker(self)
+        self.network_worker = worker
+        worker.completed.connect(self._network_discovered)
+        worker.failed.connect(self._network_discovery_failed)
+        worker.finished.connect(self._network_worker_finished)
+        worker.start()
+
+    def _network_discovered(self, result: NetworkDiscoveryResult) -> None:
+        port_text = self.server_port.text().strip() or "8000"
+        port = int(port_text)
+        try:
+            current = self.server_config.config
+            server_changed = current.server_ip != result.server_ip or current.server_port != port
+            if server_changed:
+                self.server_config.save(result.server_ip, port)
+            path = sync_traffic_generator_config(result, port)
+            if self.mitigation_service is not None:
+                if self.mitigation_service.client.host != result.vm_ip:
+                    self.mitigation_service.client.close()
+                    self.mitigation_service.client.host = result.vm_ip
+                self.mitigation_service.refresh_async()
+            if self.web_server is not None:
+                if server_changed and self.web_server.is_running:
+                    self.web_server.stop()
+                if not self.web_server.is_running:
+                    self.web_server.start(result.server_ip, port)
+        except (OSError, RuntimeError, ValueError) as error:
+            self._network_discovery_failed(str(error))
+            return
+        self.server_ip.setText(result.server_ip)
+        self.detected_server_ip.setText(result.server_ip)
+        self.detected_vm_ip.setText(result.vm_ip)
+        self.vm_identity.setText(f"{result.vm_hostname} · SSH xác thực · agent 9000")
+        self.network_status_lbl.setText("● Đã đồng bộ IDS/IPS, Traffic Generator và IPS client")
+        self.network_status_lbl.setStyleSheet("color: #34D399; font-size: 12.5px; font-weight: 600;")
+        self.network_status_lbl.setToolTip(str(path))
+        self.show_status(f"✓ DHCP: IDS {result.server_ip} · VM {result.vm_ip}", True)
+
+    def _network_discovery_failed(self, message: str) -> None:
+        self.network_status_lbl.setText("● Không thể tự cấu hình DHCP")
+        self.network_status_lbl.setToolTip(message)
+        self.network_status_lbl.setStyleSheet("color: #FF5B79; font-size: 12.5px; font-weight: 600;")
+        self.show_status(f"✕ {message}", False)
+
+    def _network_worker_finished(self) -> None:
+        self.network_detect_button.setEnabled(True)
+        worker, self.network_worker = self.network_worker, None
+        if worker is not None:
+            worker.deleteLater()
 
     def _test_db_conn(self) -> None:
         self.db_status_lbl.setText("⏳ Đang kiểm tra Database...")
@@ -1059,6 +1138,7 @@ class SettingsPage(QScrollArea):
         self.font_scale_combo.setCurrentIndex(0)
         self._reset_detection_defaults()
         self._reset_prediction_defaults()
+        self._discover_network()
         self.show_status("✓ Đã khôi phục toàn bộ cấu hình gốc của hệ thống thành công!", True)
 
     def show_status(self, text: str, is_success: bool = True) -> None:

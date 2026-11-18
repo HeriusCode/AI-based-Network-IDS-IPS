@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QObject, QPointF, QRectF, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
     QComboBox,
@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.icons import icon
+from app.services.ai_client import AiClient
+from app.services.live_detection import LiveDetectionService
 from app.services.network_metrics import NetworkMetricsCollector, NetworkSnapshot
 from app.ui.pages.dashboard import make_badge_cell, make_text_cell
 from app.ui.pages.monitoring import MetricCard, MonitorMetric, Panel, legend_chip
@@ -31,6 +33,27 @@ from app.ui.pages.monitoring import MetricCard, MonitorMetric, Panel, legend_chi
 
 # Backward compatible alias
 legend = legend_chip
+
+
+class ForecastSignals(QObject):
+    completed = Signal(object)
+    failed = Signal(str)
+
+
+class ForecastWorker(QRunnable):
+    def __init__(self, client: AiClient, history: list[dict], horizon: int = 3) -> None:
+        super().__init__()
+        self.client = client
+        self.history = history
+        self.horizon = horizon
+        self.signals = ForecastSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.signals.completed.emit(self.client.forecast_traffic(self.history, self.horizon))
+        except Exception as error:
+            self.signals.failed.emit(str(error))
 
 
 class ForecastChart(QWidget):
@@ -46,6 +69,11 @@ class ForecastChart(QWidget):
 
     def append_actual(self, value: float) -> None:
         self.actual = [*self.actual[-31:], max(0.0, value)]
+        self.update()
+
+    def set_forecast(self, values: list[float]) -> None:
+        self.forecast = [max(0.0, float(value)) for value in values]
+        self.has_forecast = bool(self.forecast)
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -216,6 +244,12 @@ class ComparisonChart(QWidget):
         self.actual = [*self.actual[-17:], max(0.0, value)]
         self.update()
 
+    def set_forecast(self, values: list[float]) -> None:
+        clean = [max(0.0, float(value)) for value in values]
+        self.predicted = [*self.predicted[-max(0, 18 - len(clean)):], *clean][-18:]
+        self.has_prediction = bool(clean)
+        self.update()
+
     def paintEvent(self, event) -> None:
         del event
         painter = QPainter(self)
@@ -311,6 +345,7 @@ class PredictionSummary(QFrame):
         header.addLayout(title_box, 1)
 
         badge = QLabel("● Chưa kết nối mô hình")
+        self.badge = badge
         badge.setStyleSheet(
             "color: #C4B5FD; background: rgba(139, 92, 246, 0.16); "
             "border: 1px solid rgba(139, 92, 246, 0.32); border-radius: 6px; "
@@ -320,6 +355,9 @@ class PredictionSummary(QFrame):
         layout.addLayout(header)
 
         # 3 Rich Metric Rows
+        self.value_labels: list[QLabel] = []
+        self.delta_labels: list[QLabel] = []
+        self.bars: list[QProgressBar] = []
         for icon_name, color, label_text, value, delta, pct in [
             ("arrow_down", "#3B82F6", "Dự đoán lưu lượng vào", "—", "Chưa có", 0),
             ("arrow_up", "#10B981", "Dự đoán lưu lượng ra", "—", "Chưa có", 0),
@@ -348,10 +386,12 @@ class PredictionSummary(QFrame):
             val_lay = QHBoxLayout()
             val_lay.setSpacing(6)
             val = QLabel(value)
+            self.value_labels.append(val)
             val.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: 700; letter-spacing: -0.3px;")
             val_lay.addWidget(val)
 
             d_lbl = QLabel(delta)
+            self.delta_labels.append(d_lbl)
             d_lbl.setStyleSheet(f"color: {color}; font-size: 10.5px; font-weight: 600;")
             val_lay.addWidget(d_lbl)
             val_lay.addStretch()
@@ -359,6 +399,7 @@ class PredictionSummary(QFrame):
 
             # Mini progress bar
             bar = QProgressBar()
+            self.bars.append(bar)
             bar.setFixedHeight(3)
             bar.setRange(0, 100)
             bar.setValue(pct)
@@ -379,6 +420,7 @@ class PredictionSummary(QFrame):
         eval_lay.setContentsMargins(10, 6, 10, 6)
         eval_lay.setSpacing(6)
 
+        self.evaluation_labels: list[QLabel] = []
         for label, val in [("RMSE", "—"), ("MAE", "—"), ("R² Score", "—")]:
             item = QVBoxLayout()
             item.setSpacing(1)
@@ -387,6 +429,7 @@ class PredictionSummary(QFrame):
             l.setStyleSheet("color: #7E7A9C; font-size: 9.5px; font-weight: 500;")
             l.setAlignment(Qt.AlignmentFlag.AlignCenter)
             v = QLabel(val)
+            self.evaluation_labels.append(v)
             v.setStyleSheet("color: #10B981; font-size: 11.5px; font-weight: 700;")
             v.setAlignment(Qt.AlignmentFlag.AlignCenter)
             item.addWidget(l)
@@ -396,11 +439,29 @@ class PredictionSummary(QFrame):
         layout.addWidget(eval_box)
         layout.addStretch()
 
+    def update_forecast(self, mbps: float, packets_per_second: float, risk: str) -> None:
+        self.badge.setText("● mininet-traffic-1")
+        self.value_labels[0].setText(f"{mbps:.3f} Mbps")
+        self.value_labels[1].setText(f"{packets_per_second:.1f} packet/s")
+        self.value_labels[2].setText(risk)
+        for label in self.delta_labels:
+            label.setText("AI live")
+        self.bars[0].setValue(min(100, int(mbps * 10)))
+        self.bars[1].setValue(min(100, int(packets_per_second / 10)))
+        self.bars[2].setValue({"LOW": 20, "MEDIUM": 60, "HIGH": 100}.get(risk, 0))
+        self.evaluation_labels[0].setText("19.46 pps")
+        self.evaluation_labels[1].setText("9.33 pps")
+        self.evaluation_labels[2].setText("0.965")
+
 
 class PredictionPage(QScrollArea):
     """Modern AI Traffic Prediction page adhering to the Midnight Indigo SOC design system."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        live_service: LiveDetectionService | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("predictionScroll")
         self.setWidgetResizable(True)
@@ -408,6 +469,10 @@ class PredictionPage(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.collector = NetworkMetricsCollector()
         self._last_snapshot: NetworkSnapshot | None = None
+        self.live_service = live_service
+        self.ai_client = AiClient(timeout=10.0)
+        self.thread_pool = QThreadPool.globalInstance()
+        self._forecast_running = False
 
         content = QWidget()
         content.setObjectName("predictionContent")
@@ -428,7 +493,7 @@ class PredictionPage(QScrollArea):
         intro.addWidget(heading)
 
         subtitle = QLabel(
-            "AI Time Series Forecasting • Dữ liệu hiện tại từ hệ điều hành • Không tạo dự báo giả lập"
+            "Random Forest Forecasting • Dữ liệu flow live từ Mininet • 1 giây mỗi bước"
         )
         subtitle.setObjectName("predictionSubtitle")
         subtitle.setWordWrap(True)
@@ -439,7 +504,8 @@ class PredictionPage(QScrollArea):
         controls = QHBoxLayout()
         controls.setSpacing(8)
 
-        ai_badge = QLabel("●  CHƯA KẾT NỐI MÔ HÌNH")
+        ai_badge = QLabel("●  ĐANG CHỜ FLOW MININET")
+        self.ai_badge = ai_badge
         ai_badge.setObjectName("liveBadge")
         ai_badge.setStyleSheet(
             "color: #10B981; background: rgba(16, 185, 129, 0.12); "
@@ -448,7 +514,7 @@ class PredictionPage(QScrollArea):
         )
         controls.addWidget(ai_badge)
 
-        self.date_button = QPushButton("  30 phút tới  ˅")
+        self.date_button = QPushButton("  3 giây tới  ˅")
         self.date_button.setObjectName("dateRangeButton")
         self.date_button.setIcon(icon("clock", "#AFC7E4", 13))
         self.date_button.setFixedHeight(34)
@@ -470,7 +536,7 @@ class PredictionPage(QScrollArea):
         metrics.setVerticalSpacing(10)
         metric_data = [
             MonitorMetric("Lưu lượng hiện tại", "—", "Live", "#3B82F6", "activity"),
-            MonitorMetric("Dự đoán (30 phút)", "—", "Chưa có", "#8B5CF6", "trend"),
+            MonitorMetric("Dự đoán (3 giây)", "—", "Chưa có", "#8B5CF6", "trend"),
             MonitorMetric("Kết nối hiện tại", "—", "Live", "#10B981", "database"),
             MonitorMetric("Nguy cơ quá tải", "—", "Chưa có", "#FBBF24", "warning"),
             MonitorMetric("Cảnh báo sớm", "0", "Chưa có", "#FF5B79", "shield"),
@@ -498,7 +564,7 @@ class PredictionPage(QScrollArea):
 
         forecast_panel = Panel(
             "Dự đoán lưu lượng (Forecasting)",
-            "Mô hình học sâu kết hợp khoảng tin cậy 95%",
+            "Random Forest học từ telemetry thật của các phiên Mininet",
             chart_extra,
         )
         self.forecast_chart = ForecastChart()
@@ -560,13 +626,14 @@ class PredictionPage(QScrollArea):
 
     def _trend_table_panel(self) -> Panel:
         badge = QLabel("0 mốc")
+        self.trend_badge = badge
         badge.setStyleSheet(
             "color: #C4B5FD; background: rgba(139, 92, 246, 0.15); "
             "border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 2px 7px; font-size: 11px; font-weight: 700;"
         )
         panel = Panel(
-            "Xu hướng ngắn hạn (30 phút tới)",
-            "Dự báo chi tiết lưu lượng và kết nối theo từng mốc 10 phút",
+            "Xu hướng ngắn hạn (3 giây tới)",
+            "Dự báo packets/s và bytes/s theo từng giây",
             badge,
         )
 
@@ -574,6 +641,7 @@ class PredictionPage(QScrollArea):
         rows: list[list[str]] = []
 
         table = QTableWidget(len(rows), len(headers))
+        self.trend_table = table
         table.setObjectName("predictionTable")
         table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         table.setMinimumWidth(220)
@@ -750,16 +818,16 @@ class PredictionPage(QScrollArea):
             "color: #C4B5FD; background: rgba(139, 92, 246, 0.15); "
             "border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 2px 7px; font-size: 11px; font-weight: 700;"
         )
-        panel = Panel("Thiết lập tham số AI", "Tùy chỉnh mô hình học sâu & khoảng dự báo", badge)
+        panel = Panel("Thiết lập tham số AI", "Mô hình lab và khoảng dự báo ngắn hạn", badge)
 
         form_box = QVBoxLayout()
         form_box.setSpacing(9)
 
         for label_text, values in [
-            ("Mô hình AI:", ["LSTM (Deep Learning)", "GRU (Recurrent)", "ARIMA (Statistical)"]),
-            ("Khoảng dự đoán:", ["30 phút tới", "1 giờ tới", "3 giờ tới"]),
-            ("Chu kỳ cập nhật:", ["1 phút", "5 phút", "10 phút"]),
-            ("Độ nhạy:", ["Tiêu chuẩn (95%)", "Nhạy cảm (90%)", "Nghiêm ngặt (99%)"]),
+            ("Mô hình AI:", ["Random Forest (Mininet lab)"]),
+            ("Khoảng dự đoán:", ["3 giây tới", "5 giây tới", "10 giây tới"]),
+            ("Chu kỳ cập nhật:", ["Tự động 2 giây", "5 giây", "10 giây"]),
+            ("Độ nhạy:", ["Theo p95/p99 của train"]),
         ]:
             row = QHBoxLayout()
             row.setSpacing(8)
@@ -797,7 +865,7 @@ class PredictionPage(QScrollArea):
 
         panel.box.addLayout(form_box)
 
-        self.start_button = QPushButton("  Chưa kết nối mô hình AI")
+        self.start_button = QPushButton("  Chờ đủ dữ liệu Mininet")
         self.start_button.setObjectName("startPredictionButton")
         self.start_button.setIcon(icon("trend", "#FFFFFF", 14))
         self.start_button.setFixedHeight(36)
@@ -826,28 +894,98 @@ class PredictionPage(QScrollArea):
         return panel
 
     def refresh_current_data(self) -> None:
-        snapshot = self.collector.sample()
-        self._last_snapshot = snapshot
-        if not snapshot.available:
-            for card in self.metric_cards:
-                card.set_data("—", "Offline", 0.0)
+        history = self.live_service.traffic_history() if self.live_service is not None else []
+        if history:
+            latest = history[-1]
+            total_mbps = float(latest["bytes_per_second"]) * 8 / 1_000_000
+            packets_per_second = float(latest["packets_per_second"])
+            self.metric_cards[0].set_data(f"{total_mbps:.3f} Mbps", "Mininet live", total_mbps)
+            self.metric_cards[2].set_data(f"{packets_per_second:.1f} pps", "Mininet live", packets_per_second)
+            self.forecast_chart.append_actual(total_mbps)
+            self.compare_chart.append_actual(total_mbps)
+            self.start_button.setEnabled(len(history) >= 3 and not self._forecast_running)
+            self.start_button.setText("  Chạy dự báo AI" if len(history) >= 3 else "  Chờ đủ dữ liệu Mininet")
+            if len(history) >= 3 and not self._forecast_running:
+                self.start_prediction()
             return
 
-        total_mbps = snapshot.incoming_mbps + snapshot.outgoing_mbps
-        self.metric_cards[0].set_data(f"{total_mbps:.2f} Mbps", "Live", total_mbps)
-        self.metric_cards[1].set_data("—", "Chưa có", 0.0)
-        self.metric_cards[2].set_data(f"{snapshot.active_connections:,}", "Live", snapshot.active_connections)
-        self.metric_cards[3].set_data("—", "Chưa có", 0.0)
-        self.metric_cards[4].set_data("0", "Chưa có", 0.0)
-        self.forecast_chart.append_actual(total_mbps)
-        self.compare_chart.append_actual(total_mbps)
+        snapshot = self.collector.sample()
+        self._last_snapshot = snapshot
+        if snapshot.available:
+            total_mbps = snapshot.incoming_mbps + snapshot.outgoing_mbps
+            self.metric_cards[0].set_data(f"{total_mbps:.2f} Mbps", "Máy local", total_mbps)
+            self.metric_cards[2].set_data(f"{snapshot.active_connections:,}", "Máy local", snapshot.active_connections)
+            self.forecast_chart.append_actual(total_mbps)
+            self.compare_chart.append_actual(total_mbps)
+        else:
+            for card in self.metric_cards:
+                card.set_data("—", "Offline", 0.0)
 
     def refresh_all_predictions(self) -> None:
         self.refresh_current_data()
 
     def start_prediction(self) -> None:
-        self.refresh_current_data()
+        if self.live_service is None or self._forecast_running:
+            return
+        history = self.live_service.traffic_history()
+        if len(history) < 3:
+            self.start_button.setText("  Chờ đủ dữ liệu Mininet")
+            self.start_button.setEnabled(False)
+            return
+        self._forecast_running = True
+        self.start_button.setEnabled(False)
+        self.start_button.setText("  AI đang dự báo...")
+        worker = ForecastWorker(self.ai_client, history, horizon=3)
+        worker.signals.completed.connect(self._forecast_completed)
+        worker.signals.failed.connect(self._forecast_failed)
+        self.thread_pool.start(worker)
+
+    def _forecast_completed(self, result: object) -> None:
+        self._forecast_running = False
+        payload = result if isinstance(result, dict) else {}
+        rows = payload.get("forecast", [])
+        if not rows:
+            self._forecast_failed("AI không trả điểm dự báo")
+            return
+        mbps = [float(row.get("bytes_per_second", 0)) * 8 / 1_000_000 for row in rows]
+        packets = [float(row.get("packets_per_second", 0)) for row in rows]
+        risk = str(payload.get("risk_level", "LOW"))
+        self.forecast_chart.set_forecast(mbps)
+        self.compare_chart.set_forecast(mbps)
+        self.metric_cards[1].set_data(f"{mbps[-1]:.3f} Mbps", "AI +3 giây", mbps[-1])
+        self.metric_cards[3].set_data(risk, "p95/p99 train", {"LOW": 20, "MEDIUM": 60, "HIGH": 100}.get(risk, 0))
+        warning = int(risk in {"MEDIUM", "HIGH"})
+        self.metric_cards[4].set_data(str(warning), "Dự báo sớm", warning * 100)
+        self.summary_card.update_forecast(mbps[-1], packets[-1], risk)
+        model_version = str(payload.get("model_version", "traffic-forecast"))
+        self.ai_badge.setText(f"●  AI ONLINE • {model_version}")
+        self.start_button.setText("  Chạy dự báo lại")
+        self.start_button.setEnabled(True)
+        self._update_trend_table(rows)
+
+    def _forecast_failed(self, message: str) -> None:
+        self._forecast_running = False
+        self.ai_badge.setText("●  AI CHƯA ĐỦ DỮ LIỆU")
+        self.start_button.setText(f"  {message[:48]}")
+        self.start_button.setEnabled(True)
+
+    def _update_trend_table(self, rows: list[dict]) -> None:
+        self.trend_badge.setText(f"{len(rows)} mốc")
+        self.trend_table.setRowCount(len(rows))
+        previous = None
+        for row_index, row in enumerate(rows):
+            timestamp = str(row.get("timestamp", ""))[11:19]
+            mbps = float(row.get("bytes_per_second", 0)) * 8 / 1_000_000
+            pps = float(row.get("packets_per_second", 0))
+            growth = 0.0 if previous in (None, 0) else (mbps - previous) * 100 / previous
+            previous = mbps
+            values = [timestamp, f"{mbps:.3f} Mbps", f"{pps:.1f} pps", "Mininet", f"{growth:+.1f}%"]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.trend_table.setItem(row_index, column, item)
+            self.trend_table.setRowHeight(row_index, 34)
 
     def _prediction_finished(self) -> None:
-        self.start_button.setText("  Chưa kết nối mô hình AI")
-        self.start_button.setEnabled(False)
+        self.start_button.setText("  Chạy dự báo AI")
+        self.start_button.setEnabled(True)

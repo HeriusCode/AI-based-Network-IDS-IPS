@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
 from app.ui.icons import icon
 from app.ui.pages.dashboard import DonutChart, make_badge_cell, make_text_cell, protocol_bar_row
 from app.ui.pages.monitoring import MetricCard, MonitorMetric, Panel, legend_chip
+from app.services.mitigation_service import MitigationService
 
 
 # Backward compatible alias
@@ -198,8 +200,10 @@ class HistoryRow(QFrame):
 class MitigationPage(QScrollArea):
     """Modern IPS Mitigation page adhering to the Midnight Indigo SOC design system."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, mitigation_service: MitigationService | None = None) -> None:
         super().__init__(parent)
+        self.mitigation_service = mitigation_service
+        self._rules: list[dict] = []
         self.setObjectName("mitigationScroll")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -223,11 +227,11 @@ class MitigationPage(QScrollArea):
         heading.setStyleSheet("color: #FFFFFF; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;")
         intro.addWidget(heading)
 
-        subtitle = QLabel("Quản lý chính sách bảo vệ mạng  •  Chưa kết nối IPS backend")
-        subtitle.setObjectName("mitigationSubtitle")
-        subtitle.setWordWrap(True)
-        subtitle.setStyleSheet("color: #8E8BA7; font-size: 11.5px; font-weight: 400;")
-        intro.addWidget(subtitle)
+        self.subtitle = QLabel("Quản lý chính sách bảo vệ mạng  •  Đang kết nối OS-Ken / Open vSwitch")
+        self.subtitle.setObjectName("mitigationSubtitle")
+        self.subtitle.setWordWrap(True)
+        self.subtitle.setStyleSheet("color: #8E8BA7; font-size: 11.5px; font-weight: 400;")
+        intro.addWidget(self.subtitle)
         header.addLayout(intro, 1)
 
         controls = QHBoxLayout()
@@ -283,8 +287,11 @@ class MitigationPage(QScrollArea):
             MonitorMetric("Sự kiện giảm thiểu", "0", "Chưa có", "#3B82F6", "document"),
             MonitorMetric("Hiệu quả bảo vệ", "—", "Chưa có", "#A78BFA", "brain"),
         ]
+        self.metric_cards: list[MetricCard] = []
         for column, data in enumerate(metric_data):
-            metrics.addWidget(MetricCard(data), 0, column)
+            card = MetricCard(data)
+            self.metric_cards.append(card)
+            metrics.addWidget(card, 0, column)
             metrics.setColumnStretch(column, 1)
         root.addLayout(metrics)
 
@@ -311,12 +318,12 @@ class MitigationPage(QScrollArea):
         impact_row.addWidget(traffic_panel, 0, 0)
 
         # 3.2 Hiệu quả giảm thiểu Donut
-        donut_badge = QLabel("Chưa có dữ liệu")
-        donut_badge.setStyleSheet(
+        self.donut_badge = QLabel("Chưa có dữ liệu")
+        self.donut_badge.setStyleSheet(
             "color: #10B981; background: rgba(16, 185, 129, 0.15); "
             "border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 2px 7px; font-size: 11px; font-weight: 700;"
         )
-        eff_panel = Panel("Hiệu quả giảm thiểu", "Tỷ trọng lưu lượng bất thường đã được xử lý", donut_badge)
+        eff_panel = Panel("Hiệu quả giảm thiểu", "Tỷ trọng lưu lượng bất thường đã được xử lý", self.donut_badge)
         eff_body = QHBoxLayout()
         eff_body.setSpacing(12)
         self.efficiency_donut = DonutChart([], "Hiệu quả", "—", "chưa có dữ liệu")
@@ -362,14 +369,19 @@ class MitigationPage(QScrollArea):
         root.addLayout(bottom_row)
 
         self.setWidget(content)
+        if self.mitigation_service is not None:
+            self.mitigation_service.snapshot_changed.connect(self._snapshot_changed)
+            self.mitigation_service.action_completed.connect(self._action_completed)
+            self.mitigation_service.error.connect(self._service_error)
+            self.mitigation_service.refresh_async()
 
     def _rules_panel(self) -> Panel:
-        badge = QLabel("0 rules")
-        badge.setStyleSheet(
+        self.rules_badge = QLabel("0 rules")
+        self.rules_badge.setStyleSheet(
             "color: #C4B5FD; background: rgba(139, 92, 246, 0.15); "
             "border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 2px 7px; font-size: 11px; font-weight: 700;"
         )
-        panel = Panel("Danh sách chính sách giảm thiểu (IPS Rules)", "Quy tắc lọc gói tin tự động và thủ công đang thực thi trên tường lửa", badge)
+        panel = Panel("Danh sách chính sách giảm thiểu (IPS Rules)", "Quy tắc OpenFlow đang thực thi trực tiếp trên Open vSwitch", self.rules_badge)
 
         toolbar = QHBoxLayout()
         toolbar.setContentsMargins(0, 0, 0, 4)
@@ -396,11 +408,13 @@ class MitigationPage(QScrollArea):
         refresh = QPushButton("  Làm mới")
         refresh.setObjectName("smallMonitorButton")
         refresh.setIcon(icon("refresh", "#FFFFFF", 13))
+        if self.mitigation_service is not None:
+            refresh.clicked.connect(self.mitigation_service.refresh_async)
         toolbar.addWidget(refresh)
         panel.box.addLayout(toolbar)
 
         headers = ["ID", "Nguồn IP", "Đích IP", "Giao thức", "Cổng", "Hành động", "Ưu tiên", "Thời gian còn lại", "Trạng thái", "Tác vụ"]
-        self.rule_table = QTableWidget(len(RULES), len(headers))
+        self.rule_table = QTableWidget(0, len(headers))
         self.rule_table.setObjectName("ruleTable")
         self.rule_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.rule_table.setMinimumWidth(250)
@@ -451,59 +465,15 @@ class MitigationPage(QScrollArea):
         self.rule_table.setColumnWidth(8, 115)  # Trạng thái
         self.rule_table.setColumnWidth(9, 55)   # Tác vụ
 
-        for r, row in enumerate(RULES):
-            self.rule_table.setRowHeight(r, 36)
-
-            # Col 0: ID
-            self.rule_table.setCellWidget(r, 0, make_text_cell(row[0], color="#9E9BB5", align_center=True))
-
-            # Col 1: Nguồn IP
-            self.rule_table.setCellWidget(r, 1, make_text_cell(row[1], color="#FFFFFF", is_mono=True, is_bold=True))
-
-            # Col 2: Đích IP
-            self.rule_table.setCellWidget(r, 2, make_text_cell(row[2], color="#C4B5FD", is_mono=True))
-
-            # Col 3: Giao thức
-            p_color = "#60A5FA" if row[3] == "TCP" else "#FDBA74" if row[3] == "UDP" else "#C4B5FD"
-            p_bg = "rgba(47, 155, 255, 0.15)" if row[3] == "TCP" else "rgba(255, 155, 55, 0.15)" if row[3] == "UDP" else "rgba(149, 81, 232, 0.15)"
-            p_bd = "rgba(47, 155, 255, 0.3)" if row[3] == "TCP" else "rgba(255, 155, 55, 0.3)" if row[3] == "UDP" else "rgba(149, 81, 232, 0.3)"
-            self.rule_table.setCellWidget(r, 3, make_badge_cell(row[3], p_bg, p_color, p_bd))
-
-            # Col 4: Cổng
-            self.rule_table.setCellWidget(r, 4, make_text_cell(row[4], color="#9E9BB5", is_mono=True, align_center=True))
-
-            # Col 5: Hành động
-            act = row[5]
-            if act == "Chặn":
-                self.rule_table.setCellWidget(r, 5, make_badge_cell("Chặn", "rgba(255, 91, 121, 0.18)", "#FF5B79", "rgba(255, 91, 121, 0.35)"))
-            else:
-                self.rule_table.setCellWidget(r, 5, make_badge_cell(act, "rgba(251, 191, 36, 0.18)", "#FBBF24", "rgba(251, 191, 36, 0.35)"))
-
-            # Col 6: Ưu tiên
-            self.rule_table.setCellWidget(r, 6, make_badge_cell(f"P{row[6]}", "rgba(139, 92, 246, 0.15)", "#C4B5FD", "rgba(139, 92, 246, 0.3)"))
-
-            # Col 7: Thời gian còn lại
-            self.rule_table.setCellWidget(r, 7, make_text_cell(row[7], color="#CBD5E1", align_center=True))
-
-            # Col 8: Trạng thái
-            status = row[8]
-            if status == "Đang hoạt động":
-                self.rule_table.setCellWidget(r, 8, make_badge_cell("Đang hoạt động", "rgba(16, 185, 129, 0.18)", "#10B981", "rgba(16, 185, 129, 0.35)"))
-            else:
-                self.rule_table.setCellWidget(r, 8, make_badge_cell("Không hoạt động", "rgba(142, 139, 167, 0.15)", "#8E8BA7", "rgba(142, 139, 167, 0.3)"))
-
-            # Col 9: Tác vụ
-            self.rule_table.setCellWidget(r, 9, make_text_cell("✎   🗑", color="#8E8BA7", align_center=True))
-
         panel.box.addWidget(self.rule_table)
 
         # Pagination
         footer = QHBoxLayout()
         footer.setContentsMargins(4, 4, 4, 0)
-        count = QLabel("Chưa có chính sách từ IPS backend")
-        count.setObjectName("flowFooter")
-        count.setStyleSheet("color: #8E8BA7; font-size: 11px;")
-        footer.addWidget(count)
+        self.rule_count = QLabel("Đang tải chính sách từ OS-Ken")
+        self.rule_count.setObjectName("flowFooter")
+        self.rule_count.setStyleSheet("color: #8E8BA7; font-size: 11px;")
+        footer.addWidget(self.rule_count)
         footer.addStretch()
 
         for page in ("‹", "1", "›"):
@@ -528,16 +498,22 @@ class MitigationPage(QScrollArea):
         panel = Panel("Thêm chính sách mới", "Thiết lập quy tắc lọc và giới hạn băng thông", badge)
         panel.box.setSpacing(8)
 
-        tabs = QHBoxLayout()
-        tabs.setSpacing(6)
-        for index, text in enumerate(("Chặn lưu lượng", "Giới hạn tốc độ", "Tùy chỉnh")):
-            button = QPushButton(text)
-            button.setObjectName("activeRuleTab" if index == 0 else "ruleTab")
-            tabs.addWidget(button)
-        panel.box.addLayout(tabs)
+        action_box = QVBoxLayout()
+        action_box.setSpacing(2)
+        action_label = QLabel("Hành động:")
+        action_label.setObjectName("ruleFormLabel")
+        action_box.addWidget(action_label)
+        self.action_combo = QComboBox()
+        self.action_combo.setObjectName("ruleFormCombo")
+        self.action_combo.addItem("Chặn IP nguồn", "block_ip")
+        self.action_combo.addItem("Chặn flow cụ thể", "block_flow")
+        self.action_combo.addItem("Giới hạn tốc độ", "rate_limit")
+        self.action_combo.addItem("Chỉ cảnh báo", "alert")
+        action_box.addWidget(self.action_combo)
+        panel.box.addLayout(action_box)
 
-        self.source_input = self._field(panel, "Nguồn (Source IP):", "VD: 192.168.1.100 hoặc 192.168.1.0/24")
-        self.destination_input = self._field(panel, "Đích (Destination IP):", "VD: 192.168.1.10 hoặc any")
+        self.source_input = self._field(panel, "Nguồn (Source IP):", "VD: 10.0.0.1")
+        self.destination_input = self._field(panel, "Đích (Destination IP):", "VD: 10.0.0.3 hoặc any")
 
         protocol_row = QHBoxLayout()
         protocol_row.setSpacing(8)
@@ -547,10 +523,10 @@ class MitigationPage(QScrollArea):
         lbl_proto = QLabel("Giao thức:")
         lbl_proto.setObjectName("ruleFormLabel")
         protocol_box.addWidget(lbl_proto)
-        protocol = QComboBox()
-        protocol.setObjectName("ruleFormCombo")
-        protocol.addItems(["TCP", "UDP", "ICMP", "Any"])
-        protocol_box.addWidget(protocol)
+        self.protocol_combo = QComboBox()
+        self.protocol_combo.setObjectName("ruleFormCombo")
+        self.protocol_combo.addItems(["Any", "TCP", "UDP", "ICMP"])
+        protocol_box.addWidget(self.protocol_combo)
         protocol_row.addLayout(protocol_box)
 
         port_box = QVBoxLayout()
@@ -558,10 +534,10 @@ class MitigationPage(QScrollArea):
         lbl_port = QLabel("Cổng đích:")
         lbl_port.setObjectName("ruleFormLabel")
         port_box.addWidget(lbl_port)
-        port = QLineEdit()
-        port.setObjectName("ruleInput")
-        port.setPlaceholderText("VD: 80, 443, any")
-        port_box.addWidget(port)
+        self.port_input = QLineEdit()
+        self.port_input.setObjectName("ruleInput")
+        self.port_input.setPlaceholderText("VD: 80 hoặc any")
+        port_box.addWidget(self.port_input)
         protocol_row.addLayout(port_box)
 
         panel.box.addLayout(protocol_row)
@@ -571,11 +547,14 @@ class MitigationPage(QScrollArea):
         lbl_dur = QLabel("Thời gian áp dụng:")
         lbl_dur.setObjectName("ruleFormLabel")
         duration_box.addWidget(lbl_dur)
-        duration = QComboBox()
-        duration.setObjectName("ruleFormCombo")
-        duration.addItems(["30 phút", "1 giờ", "3 giờ", "Vô thời hạn"])
-        duration_box.addWidget(duration)
+        self.duration_combo = QComboBox()
+        self.duration_combo.setObjectName("ruleFormCombo")
+        for label, seconds in (("30 giây", 30), ("1 phút", 60), ("5 phút", 300), ("15 phút", 900), ("1 giờ", 3600)):
+            self.duration_combo.addItem(label, seconds)
+        duration_box.addWidget(self.duration_combo)
         panel.box.addLayout(duration_box)
+
+        self.rate_input = self._field(panel, "Giới hạn tốc độ (Kbps):", "Mặc định: 256")
 
         self.reason_input = self._field(panel, "Lý do / Mô tả:", "Nhập lý do áp dụng chính sách...")
 
@@ -619,72 +598,189 @@ class MitigationPage(QScrollArea):
         return field
 
     def _history_panel(self) -> Panel:
-        badge = QLabel("0 sự kiện")
-        badge.setStyleSheet(
+        self.history_badge = QLabel("0 sự kiện")
+        self.history_badge.setStyleSheet(
             "color: #C4B5FD; background: rgba(139, 92, 246, 0.15); "
             "border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 2px 7px; font-size: 11px; font-weight: 700;"
         )
-        panel = Panel("Nhật ký thực thi giảm thiểu gần đây (IPS Audit Log)", "Ghi nhận toàn bộ thao tác kích hoạt, chỉnh sửa và gỡ bỏ chính sách bảo vệ", badge)
+        panel = Panel("Nhật ký thực thi giảm thiểu gần đây (IPS Audit Log)", "Ghi nhận thao tác đã gửi thật tới OS-Ken và Open vSwitch", self.history_badge)
 
-        empty = QLabel("Chưa có lịch sử thực thi từ IPS backend")
-        empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty.setStyleSheet("color: #8E8BA7; font-size: 12px; padding: 28px 8px;")
-        panel.box.addWidget(empty)
+        self.history_container = QWidget()
+        self.history_layout = QVBoxLayout(self.history_container)
+        self.history_layout.setContentsMargins(0, 0, 0, 0)
+        self.history_layout.setSpacing(6)
+        self.history_empty = QLabel("Chưa có lịch sử thực thi từ IPS backend")
+        self.history_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.history_empty.setStyleSheet("color: #8E8BA7; font-size: 12px; padding: 28px 8px;")
+        self.history_layout.addWidget(self.history_empty)
+        panel.box.addWidget(self.history_container)
 
         return panel
 
     def toggle_ips(self) -> None:
+        if self.mitigation_service is None:
+            return
         active = not self.ips_toggle.isChecked() if self.sender() is self.pause_button else self.ips_toggle.isChecked()
-        self.ips_toggle.setChecked(active)
-        if active:
-            self.ips_toggle.setText("●  IPS HOẠT ĐỘNG")
-            self.ips_toggle.setStyleSheet("""
-                QPushButton#ipsToggle {
-                    min-width: 135px;
-                    height: 34px;
-                    background: rgba(16, 185, 129, 0.12);
-                    border: 1px solid rgba(16, 185, 129, 0.25);
-                    border-radius: 8px;
-                    color: #10B981;
-                    font-size: 11px;
-                    font-weight: 700;
-                    padding: 0 10px;
-                }
-            """)
-            self.pause_button.setText("  Tạm dừng IPS")
-            self.pause_button.setIcon(icon("pause", "#FFFFFF", 13))
-            self.pause_button.setStyleSheet("background: #DC2626;")
-        else:
-            self.ips_toggle.setText("●  IPS TẠM DỪNG")
-            self.ips_toggle.setStyleSheet("""
-                QPushButton#ipsToggle {
-                    min-width: 135px;
-                    height: 34px;
-                    background: rgba(239, 68, 68, 0.12);
-                    border: 1px solid rgba(239, 68, 68, 0.25);
-                    border-radius: 8px;
-                    color: #FF5B79;
-                    font-size: 11px;
-                    font-weight: 700;
-                    padding: 0 10px;
-                }
-            """)
-            self.pause_button.setText("  Kích hoạt IPS")
-            self.pause_button.setIcon(icon("activity", "#FFFFFF", 13))
-            self.pause_button.setStyleSheet("background: #10B981;")
+        self.ips_toggle.setEnabled(False)
+        self.pause_button.setEnabled(False)
+        self.mitigation_service.set_enabled_async(active)
 
     def add_rule(self) -> None:
         if not self.source_input.text().strip():
             self.rule_status.setText("⚠ Vui lòng nhập địa chỉ IP nguồn cần áp dụng.")
             self.rule_status.setProperty("valid", False)
-        else:
-            self.rule_status.setText("⚠ Chưa kết nối IPS backend nên chưa thể áp dụng chính sách.")
+        elif self.mitigation_service is None:
+            self.rule_status.setText("⚠ Dịch vụ IPS chưa được khởi tạo.")
             self.rule_status.setProperty("valid", False)
+        else:
+            action = str(self.action_combo.currentData())
+            port_text = self.port_input.text().strip().lower()
+            rate_text = self.rate_input.text().strip()
+            try:
+                port = None if port_text in {"", "any", "*"} else int(port_text)
+                rate = int(rate_text or "256")
+            except ValueError:
+                self.rule_status.setText("⚠ Cổng và tốc độ phải là số hợp lệ.")
+                self.rule_status.setProperty("valid", False)
+                self.rule_status.style().unpolish(self.rule_status)
+                self.rule_status.style().polish(self.rule_status)
+                return
+            payload = {
+                "action": action,
+                "source_ip": self.source_input.text().strip(),
+                "destination_ip": self.destination_input.text().strip() or None,
+                "protocol": self.protocol_combo.currentText().lower(),
+                "destination_port": port,
+                "duration": int(self.duration_combo.currentData()),
+                "rate_kbps": rate,
+                "reason": self.reason_input.text().strip() or "Manual policy from IDS/IPS UI",
+                "origin": "manual-ui",
+            }
+            self.rule_status.setText("Đang gửi chính sách tới OS-Ken...")
+            self.rule_status.setProperty("valid", True)
+            self.mitigation_service.add_rule_async(payload)
         self.rule_status.style().unpolish(self.rule_status)
         self.rule_status.style().polish(self.rule_status)
 
     def reset_form(self) -> None:
         self.source_input.clear()
         self.destination_input.clear()
+        self.port_input.clear()
+        self.rate_input.clear()
         self.reason_input.clear()
         self.rule_status.clear()
+
+    def _set_mode_display(self, connected: bool, enabled: bool) -> None:
+        self.ips_toggle.blockSignals(True)
+        self.ips_toggle.setChecked(enabled)
+        self.ips_toggle.blockSignals(False)
+        self.ips_toggle.setEnabled(connected)
+        self.pause_button.setEnabled(connected)
+        self.mode_button.setEnabled(connected)
+        if not connected:
+            self.ips_toggle.setText("●  CHƯA KẾT NỐI IPS")
+            self.mode_button.setText("  Chế độ: Không khả dụng")
+            return
+        self.ips_toggle.setText("●  IPS HOẠT ĐỘNG" if enabled else "●  IPS TẠM DỪNG")
+        self.mode_button.setText("  Chế độ: Tự động theo AI" if enabled else "  Chế độ: Giám sát")
+        self.pause_button.setText("  Tạm dừng IPS" if enabled else "  Kích hoạt IPS")
+        self.pause_button.setIcon(icon("pause" if enabled else "activity", "#FFFFFF", 13))
+
+    def _snapshot_changed(self, snapshot: dict) -> None:
+        health = snapshot.get("health", {})
+        connected = health.get("status") == "ok" and bool(health.get("ovs_connected"))
+        enabled = bool(health.get("enabled"))
+        self._set_mode_display(connected, enabled)
+        self.subtitle.setText(
+            "Quản lý chính sách bảo vệ mạng  •  OS-Ken + OVS OpenFlow 1.3 đã kết nối"
+            if connected else "Quản lý chính sách bảo vệ mạng  •  Chưa có OVS kết nối OS-Ken"
+        )
+        rules = list(snapshot.get("rules", []))
+        audit = list(snapshot.get("audit", []))
+        self._render_rules(rules)
+        self._render_audit(audit)
+        active = sum(rule.get("status") == "active" for rule in rules)
+        blocked = sum(
+            rule.get("status") == "active" and rule.get("action") in {"block_ip", "block_flow"}
+            for rule in rules
+        )
+        limited = sum(rule.get("status") == "active" and rule.get("action") == "rate_limit" for rule in rules)
+        values = (
+            (str(active), "OpenFlow", active),
+            (str(blocked), "rules", blocked),
+            (str(limited), "meters", limited),
+            (str(len(audit)), "audit", len(audit)),
+            ("100%" if connected else "—", "OVS", 100 if connected else 0),
+        )
+        for card, (value, label, spark) in zip(self.metric_cards, values):
+            card.set_data(value, label, float(spark))
+        self.mitigation_chart.has_enforcement = bool(active)
+        self.mitigation_chart.update()
+
+    def _render_rules(self, rules: list[dict]) -> None:
+        self._rules = rules
+        self.rule_table.clearContents()
+        self.rule_table.setRowCount(len(rules))
+        action_names = {"block_ip": "Chặn IP", "block_flow": "Chặn Flow", "rate_limit": "Rate Limit"}
+        for row_index, rule in enumerate(rules):
+            self.rule_table.setRowHeight(row_index, 36)
+            protocol = str(rule.get("protocol") or "any").upper()
+            action = action_names.get(str(rule.get("action")), str(rule.get("action")))
+            status = "Đang hoạt động" if rule.get("status") == "active" else str(rule.get("status", "—"))
+            values = (
+                str(rule.get("id", ""))[:8], str(rule.get("source_ip", "—")),
+                str(rule.get("destination_ip") or "any"), protocol,
+                str(rule.get("destination_port") or "any"), action,
+                str(rule.get("priority") or "—"), f"{int(rule.get('remaining_seconds', 0))}s", status,
+            )
+            for column, value in enumerate(values):
+                self.rule_table.setCellWidget(
+                    row_index, column,
+                    make_text_cell(value, color="#FFFFFF" if column in {1, 5} else "#CBD5E1", align_center=column != 1),
+                )
+            delete = QPushButton("Gỡ")
+            delete.setObjectName("smallMonitorButton")
+            delete.setToolTip("Gỡ rule khỏi Open vSwitch")
+            delete.clicked.connect(lambda _checked=False, rule_id=str(rule.get("id")): self._delete_rule(rule_id))
+            self.rule_table.setCellWidget(row_index, 9, delete)
+        active = sum(rule.get("status") == "active" for rule in rules)
+        self.rules_badge.setText(f"{active} active")
+        self.rule_count.setText(f"{len(rules)} chính sách từ OS-Ken · {active} đang thực thi")
+
+    def _render_audit(self, events: list[dict]) -> None:
+        while self.history_layout.count():
+            item = self.history_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        visible = events[:6]
+        if not visible:
+            self.history_empty = QLabel("Chưa có lịch sử thực thi từ IPS backend")
+            self.history_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.history_empty.setStyleSheet("color: #8E8BA7; font-size: 12px; padding: 28px 8px;")
+            self.history_layout.addWidget(self.history_empty)
+        event_names = {
+            "rule_created": "Đã áp dụng rule OpenFlow", "rule_removed": "Đã gỡ rule",
+            "rule_expired": "Rule đã hết hạn", "ips_enabled": "Đã kích hoạt IPS",
+            "ips_paused": "Đã tạm dừng IPS", "alert": "AI cảnh báo",
+        }
+        for event in visible:
+            timestamp = str(event.get("timestamp", ""))[11:19]
+            name = event_names.get(str(event.get("event")), str(event.get("event", "IPS")))
+            subtitle = f"{event.get('source_ip', '')}  {event.get('reason', '')}".strip()
+            self.history_layout.addWidget(HistoryRow("shield", "#10B981", name, subtitle, timestamp, str(event.get("action") or "IPS")))
+        self.history_badge.setText(f"{len(events)} sự kiện")
+
+    def _delete_rule(self, rule_id: str) -> None:
+        if self.mitigation_service is not None:
+            self.mitigation_service.delete_rule_async(rule_id)
+
+    def _action_completed(self, success: bool, message: str) -> None:
+        self.rule_status.setText(("✓ " if success else "⚠ ") + message)
+        self.rule_status.setProperty("valid", success)
+        self.rule_status.style().unpolish(self.rule_status)
+        self.rule_status.style().polish(self.rule_status)
+
+    def _service_error(self, message: str) -> None:
+        self._set_mode_display(False, False)
+        self.subtitle.setText(f"Quản lý chính sách bảo vệ mạng  •  Lỗi kết nối: {message}")

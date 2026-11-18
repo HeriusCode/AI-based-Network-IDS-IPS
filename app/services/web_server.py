@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
@@ -10,11 +11,16 @@ from urllib.request import urlopen
 
 from PySide6.QtCore import QObject, Signal
 
+from app.services.live_detection import LiveDetectionService
+
 
 class _HealthHandler(BaseHTTPRequestHandler):
     server_version = "CyberaIDS/1.0"
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        if self.path.rstrip("/") == "/api/flows":
+            self._send_json(200, {"flows": self.server.live_service.snapshot()})
+            return
         if self.path.rstrip("/") not in {"/health", "/api/health"}:
             self._send_json(404, {"status": "not_found"})
             return
@@ -26,8 +32,40 @@ class _HealthHandler(BaseHTTPRequestHandler):
                 "service": "AI-based Network IDS/IPS",
                 "server_ip": host,
                 "server_port": port,
+                "live_flow_ingest": True,
+                "batch_flow_ingest": True,
             },
         )
+
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        if self.path.rstrip("/") != "/api/flows":
+            self._send_json(404, {"detail": "not_found"})
+            return
+        token = os.getenv("IDS_INGEST_TOKEN", "")
+        peer = self.client_address[0]
+        if token:
+            authorized = self.headers.get("Authorization", "") == f"Bearer {token}"
+        else:
+            authorized = peer in {"127.0.0.1", "::1", self.server.server_address[0]}
+        if not authorized:
+            self._send_json(403, {"detail": "Flow ingest chỉ nhận từ máy cục bộ hoặc token hợp lệ"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 262144:
+                raise ValueError("Kích thước flow không hợp lệ")
+            payload = json.loads(self.rfile.read(length))
+            result = (
+                self.server.live_service.ingest_many(payload)
+                if isinstance(payload, list) else self.server.live_service.ingest(payload)
+            )
+        except (ValueError, TypeError, KeyError, IndexError) as error:
+            self._send_json(422, {"detail": str(error)})
+            return
+        except Exception as error:
+            self._send_json(502, {"detail": f"AI inference thất bại: {error}"})
+            return
+        self._send_json(200, result)
 
     def _send_json(self, status_code: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -50,6 +88,7 @@ class WebServerController(QObject):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
+        self.live_service = LiveDetectionService(parent=self)
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -64,6 +103,7 @@ class WebServerController(QObject):
         try:
             server = ThreadingHTTPServer((server_ip, int(server_port)), _HealthHandler)
             server.daemon_threads = True
+            server.live_service = self.live_service
         except OSError as exc:
             self.state_changed.emit(False, f"Không thể mở server: {exc}")
             return False

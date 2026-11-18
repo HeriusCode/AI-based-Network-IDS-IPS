@@ -2,3 +2,20 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.idea/
+.vscode/
+
+# CIC-IDS2017 and generated artifacts can be very large.
+data/raw/*
+!data/raw/.gitkeep
+data/raw_with_metadata/*
+!data/raw_with_metadata/.gitkeep
+data/cicids2017/raw_metadata/*
+!data/cicids2017/raw_metadata/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+models/*
+!models/.gitkeep
+results/*
+!results/.gitkeep
+

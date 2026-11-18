@@ -1,0 +1,223 @@
+"""Application shell, frameless controls and resize behavior."""
+
+from PySide6.QtCore import QEvent, QRect, Qt, Signal
+from PySide6.QtGui import QCloseEvent, QCursor, QMouseEvent
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
+
+from app.core.config import WINDOW_TITLE
+from app.core.navigation import NAV_ITEMS
+from app.core.server_config import ServerConfigManager
+from app.services.web_server import WebServerController
+from app.services.mitigation_service import MitigationService
+from app.ui.dialogs import LogoutConfirmDialog
+from app.ui.pages.dashboard import DashboardPage
+from app.ui.pages.alerts import AlertsPage
+from app.ui.pages.detection import DetectionPage
+from app.ui.pages.monitoring import MonitoringPage
+from app.ui.pages.mitigation import MitigationPage
+from app.ui.pages.prediction import PredictionPage
+from app.ui.pages.reports import ReportsPage
+from app.ui.pages.settings import SettingsPage
+from app.ui.pages.topology import TopologyPage
+from app.ui.pages.placeholder import PlaceholderPage
+from app.ui.sidebar import Sidebar
+from app.ui.topbar import Topbar
+
+
+class ResizeHandle(QWidget):
+    """Transparent native resize target for one window edge or corner."""
+
+    def __init__(self, edge: Qt.Edge, cursor: Qt.CursorShape, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.edge = edge
+        self.setCursor(QCursor(cursor))
+        self.setObjectName("resizeHandle")
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            window = self.window()
+            handle = window.windowHandle()
+            if handle is not None and handle.startSystemResize(self.edge):
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+
+class MainWindow(QMainWindow):
+    logout_requested = Signal()
+    GRIP = 7
+    CORNER = 14
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.server_config_manager = ServerConfigManager(parent=self)
+        self.web_server = WebServerController(parent=self)
+        self.mitigation_service = MitigationService(parent=self)
+        self.web_server.live_service.changed.connect(self.mitigation_service.evaluate_async)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        self.setWindowTitle(WINDOW_TITLE)
+        self.resize(1536, 960)
+        self.setMinimumSize(850, 560)
+
+        root = QWidget()
+        root.setObjectName("appRoot")
+        self.setCentralWidget(root)
+        shell = QHBoxLayout(root)
+        shell.setContentsMargins(1, 1, 1, 1)
+        shell.setSpacing(0)
+
+        self.sidebar = Sidebar()
+        self.sidebar.page_selected.connect(self.navigate)
+        self.sidebar.logout_requested.connect(self.confirm_logout)
+        shell.addWidget(self.sidebar)
+
+        right = QWidget()
+        right.setObjectName("rightPane")
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+        self.topbar = Topbar()
+        self.topbar.settings_requested.connect(lambda: self.navigate("settings"))
+        self.topbar.notifications_requested.connect(self.show_notifications)
+        self.topbar.minimize_requested.connect(self.minimize_window)
+        self.topbar.maximize_requested.connect(self.toggle_maximize)
+        self.topbar.close_requested.connect(self.close)
+        right_layout.addWidget(self.topbar)
+
+        self.pages = QStackedWidget()
+        self._page_index: dict[str, int] = {}
+        self._loaded_pages: dict[str, QWidget] = {}
+        self._page_factories = {
+            "dashboard": lambda: DashboardPage(
+                server_config=self.server_config_manager,
+                web_server=self.web_server,
+            ),
+            "monitoring": MonitoringPage,
+            "detection": lambda: DetectionPage(
+                live_service=self.web_server.live_service,
+                mitigation_service=self.mitigation_service,
+            ),
+            "prediction": lambda: PredictionPage(live_service=self.web_server.live_service),
+            "mitigation": lambda: MitigationPage(mitigation_service=self.mitigation_service),
+            "topology": TopologyPage,
+            "alerts": AlertsPage,
+            "reports": ReportsPage,
+            "settings": lambda: SettingsPage(
+                server_config=self.server_config_manager,
+                mitigation_service=self.mitigation_service,
+                web_server=self.web_server,
+            ),
+        }
+        for item in NAV_ITEMS:
+            if item.key == "dashboard":
+                page = DashboardPage(
+                    server_config=self.server_config_manager,
+                    web_server=self.web_server,
+                )
+                self._loaded_pages[item.key] = page
+            elif item.key == "settings":
+                # Load auto-DHCP monitoring immediately after login, even if the
+                # user never opens the Settings tab.
+                page = self._page_factories[item.key]()
+                self._loaded_pages[item.key] = page
+            elif item.key in self._page_factories:
+                page = QWidget()
+            else:
+                page = PlaceholderPage(item)
+                self._loaded_pages[item.key] = page
+            self._page_index[item.key] = self.pages.addWidget(page)
+        right_layout.addWidget(self.pages, 1)
+        shell.addWidget(right, 1)
+
+        self._resize_handles = self._create_resize_handles()
+        self.navigate("dashboard")
+
+    def _create_resize_handles(self) -> dict[str, ResizeHandle]:
+        return {
+            "top": ResizeHandle(Qt.Edge.TopEdge, Qt.CursorShape.SizeVerCursor, self),
+            "bottom": ResizeHandle(Qt.Edge.BottomEdge, Qt.CursorShape.SizeVerCursor, self),
+            "left": ResizeHandle(Qt.Edge.LeftEdge, Qt.CursorShape.SizeHorCursor, self),
+            "right": ResizeHandle(Qt.Edge.RightEdge, Qt.CursorShape.SizeHorCursor, self),
+            "top_left": ResizeHandle(Qt.Edge.TopEdge | Qt.Edge.LeftEdge, Qt.CursorShape.SizeFDiagCursor, self),
+            "top_right": ResizeHandle(Qt.Edge.TopEdge | Qt.Edge.RightEdge, Qt.CursorShape.SizeBDiagCursor, self),
+            "bottom_left": ResizeHandle(Qt.Edge.BottomEdge | Qt.Edge.LeftEdge, Qt.CursorShape.SizeBDiagCursor, self),
+            "bottom_right": ResizeHandle(Qt.Edge.BottomEdge | Qt.Edge.RightEdge, Qt.CursorShape.SizeFDiagCursor, self),
+        }
+
+    def _position_resize_handles(self) -> None:
+        width, height = self.width(), self.height()
+        grip, corner = self.GRIP, self.CORNER
+        positions = {
+            "top": QRect(corner, 0, max(0, width - corner * 2), grip),
+            "bottom": QRect(corner, height - grip, max(0, width - corner * 2), grip),
+            "left": QRect(0, corner, grip, max(0, height - corner * 2)),
+            "right": QRect(width - grip, corner, grip, max(0, height - corner * 2)),
+            "top_left": QRect(0, 0, corner, corner),
+            "top_right": QRect(width - corner, 0, corner, corner),
+            "bottom_left": QRect(0, height - corner, corner, corner),
+            "bottom_right": QRect(width - corner, height - corner, corner, corner),
+        }
+        visible = not self.isMaximized() and not self.isFullScreen()
+        for name, handle in self._resize_handles.items():
+            handle.setGeometry(positions[name])
+            handle.setVisible(visible)
+            if visible:
+                handle.raise_()
+
+    def navigate(self, key: str) -> None:
+        if key not in self._page_index:
+            return
+        index = self._page_index[key]
+        if key not in self._loaded_pages:
+            placeholder = self.pages.widget(index)
+            page = self._page_factories[key]()
+            self.pages.insertWidget(index, page)
+            self.pages.removeWidget(placeholder)
+            placeholder.deleteLater()
+            self._loaded_pages[key] = page
+        self.pages.setCurrentIndex(index)
+        self.sidebar.select(key)
+        self.topbar.set_page_title(next(item.title for item in NAV_ITEMS if item.key == key))
+
+    def minimize_window(self) -> None:
+        """Minimize after the button click has completed on frameless Windows."""
+        self.setWindowState(self.windowState() | Qt.WindowState.WindowMinimized)
+
+    def toggle_maximize(self) -> None:
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            # Keep the account card visible whenever entering the maximized layout.
+            self.sidebar.set_collapsed(False)
+            self.showMaximized()
+        self.topbar.set_maximized(self.isMaximized())
+        self._position_resize_handles()
+
+    def show_notifications(self) -> None:
+        QMessageBox.information(self, "Thông báo", "Bạn có 3 cảnh báo an ninh mới trong dữ liệu mô phỏng.")
+
+    def confirm_logout(self) -> None:
+        username = self.sidebar.account_name.text() if hasattr(self.sidebar, "account_name") else "admin"
+        role = self.sidebar.account_role.text() if hasattr(self.sidebar, "account_role") else "Quản trị viên"
+        dialog = LogoutConfirmDialog(username=username, role=role, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.logout_requested.emit()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.topbar.set_compact(self.width() < 1100)
+        if hasattr(self, "_resize_handles"):
+            self._position_resize_handles()
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "_resize_handles"):
+            self.topbar.set_maximized(self.isMaximized())
+            self.sidebar.account.setVisible(True)
+            self._position_resize_handles()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self.web_server.is_running:
+            self.web_server.stop()
+        self.mitigation_service.close()
+        super().closeEvent(event)

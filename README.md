@@ -67,20 +67,31 @@ quả AI live: DoS/DDoS được rate-limit, Port Scan và Brute Force cần nhi
 chứng trong cửa sổ thời gian, còn các flow Web/Botnet/Infiltration có độ tin cậy
 cao được chặn theo flow. Kết quả chưa xác định hoặc score thấp chỉ tạo cảnh báo.
 
-Cấu hình mặc định là VM `192.168.201.130`, user `root`, agent `9000`, và khóa
-`~/.ssh/traffic-generator-vm`. Có thể thay bằng các biến `MININET_VM_IP`,
-`MININET_VM_USER`, `MININET_AGENT_PORT`, `MININET_SSH_KEY`.
+Cấu hình cũ mặc định là VM `192.168.201.130`, user `root`, agent `9000`, và
+khóa `~/.ssh/traffic-generator-vm`. Có thể thay bằng các biến
+`MININET_VM_IP`, `MININET_VM_USER`, `MININET_AGENT_PORT`,
+`MININET_SSH_KEY` và `MININET_AGENT_URL`.
 
-### Tự động cập nhật khi DHCP đổi địa chỉ
+### Tự động phát hiện Tailscale, tunnel và VMware
 
-Sau khi đăng nhập, trang **Cài đặt → Kết nối hệ thống** tự kiểm tra mỗi 30 giây.
-Hệ thống đọc VMware DHCP lease, sau đó xác thực ứng viên bằng hostname
-`duy-server`, SSH key và endpoint health của Mininet agent. Khi IP thay đổi, nó
-tự cập nhật IDS server, IPS client và `Traffic Generator/data/config.json`.
-Traffic Generator theo dõi file này mỗi 2 giây và nạp cấu hình mới khi không có
-phiên traffic đang chạy. Nút **Phát hiện & đồng bộ ngay** cho phép kiểm tra thủ
-công. Cổng OpenFlow `6653` và REST `8080` của OS-Ken là kết nối nội bộ trong VM,
-không cần nhập trong UI desktop.
+Sau khi đăng nhập, trang **Cài đặt → Kết nối hệ thống** tự kiểm tra mỗi 30 giây
+theo thứ tự:
+
+1. Tunnel local tại `http://127.0.0.1:19000` hoặc `MININET_AGENT_URL`.
+2. Peer Tailscale có hostname `duy-server` từ `tailscale status --json`.
+3. IP cấu hình trong biến môi trường hoặc file Traffic Generator cục bộ.
+4. VMware DHCP lease và ARP `192.168.201.x`.
+
+Ứng dụng xác thực hostname, SSH key và health của Mininet agent; nó thử SSH user
+trong `MININET_VM_USER`, rồi `trafficuser` và `root`. Khi dùng Tailscale,
+IP Tailscale của máy IDS/IPS được chọn làm endpoint để Traffic Generator trên
+máy khác kết nối. Nếu Traffic Generator nằm cùng máy, file
+`Traffic Generator/data/config.json` cũng được đồng bộ; nếu không có file này,
+việc tự cấu hình IDS/IPS vẫn tiếp tục bình thường.
+
+Nút **Phát hiện & đồng bộ ngay** cho phép kiểm tra thủ công. Cổng OpenFlow
+`6653` và REST `8080` của OS-Ken là kết nối nội bộ trong VM, không cần nhập
+trong UI desktop.
 
 ## Đã có ở Bước 1
 

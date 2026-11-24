@@ -22,12 +22,33 @@ class IpsClient:
         self.host = os.getenv("MININET_VM_IP", "192.168.201.130")
         self.user = os.getenv("MININET_VM_USER", "root")
         self.agent_port = int(os.getenv("MININET_AGENT_PORT", "9000"))
+        self.direct_url = os.getenv("MININET_AGENT_URL", "").strip().rstrip("/")
         key_value = os.getenv("MININET_SSH_KEY", str(Path.home() / ".ssh" / "traffic-generator-vm"))
         self.key_path = Path(key_value).expanduser()
         self.process: subprocess.Popen[bytes] | None = None
         self.base_url = ""
 
+    def configure(
+        self,
+        *,
+        host: str,
+        user: str,
+        agent_port: int,
+        direct_url: str = "",
+    ) -> None:
+        """Apply a discovered connection without requiring an application restart."""
+        self.close()
+        self.host = host
+        self.user = user
+        self.agent_port = int(agent_port)
+        self.direct_url = direct_url.strip().rstrip("/")
+        self.base_url = self.direct_url
+
     def connect(self) -> None:
+        if self.direct_url:
+            self.base_url = self.direct_url
+            self._request("GET", "/api/ips/health", timeout=1.5)
+            return
         if self.process is not None and self.process.poll() is None:
             return
         self.close()

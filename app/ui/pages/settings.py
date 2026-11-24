@@ -687,15 +687,15 @@ class SettingsPage(QScrollArea):
         server_hint.setStyleSheet("color: #60A5FA; font-size: 11.5px; font-weight: 600;")
         server_card.box.addWidget(server_hint)
 
-        # Card 1: automatic DHCP discovery and cross-application synchronization.
+        # Card 1: automatic Tailscale/tunnel discovery with VMware fallback.
         card1 = SettingsCard(
-            "Tự động cấu hình kết nối DHCP",
+            "Tự động cấu hình kết nối Mininet",
             "nodes",
             "#60A5FA",
-            "Tự tìm IP máy IDS và Mininet VM, sau đó đồng bộ sang Traffic Generator",
+            "Ưu tiên tunnel local và Tailscale; VMware DHCP được dùng làm dự phòng",
         )
         self.auto_dhcp_toggle = ToggleButton(True)
-        card1.add_row("Theo dõi thay đổi DHCP mỗi 30 giây", self.auto_dhcp_toggle, 0)
+        card1.add_row("Tự kiểm tra kết nối mỗi 30 giây", self.auto_dhcp_toggle, 0)
         self.detected_server_ip = input_field(endpoint.server_ip)
         self.detected_server_ip.setReadOnly(True)
         card1.add_row("IP máy IDS/IPS", self.detected_server_ip)
@@ -713,7 +713,7 @@ class SettingsPage(QScrollArea):
         self.network_detect_button.clicked.connect(self._discover_network)
         card1.box.addWidget(self.network_detect_button, 0, Qt.AlignmentFlag.AlignRight)
 
-        self.network_status_lbl = QLabel("● Chưa kiểm tra kết nối DHCP")
+        self.network_status_lbl = QLabel("● Chưa kiểm tra kết nối Mininet")
         self.network_status_lbl.setObjectName("connectionStatus")
         card1.add_row("Trạng thái tự cấu hình", self.network_status_lbl, 0)
         card1.box.addStretch(1)
@@ -1052,7 +1052,7 @@ class SettingsPage(QScrollArea):
         if self.network_worker is not None and self.network_worker.isRunning():
             return
         self.network_detect_button.setEnabled(False)
-        self.network_status_lbl.setText("⏳ Đang đọc DHCP lease và xác thực SSH tới Mininet VM...")
+        self.network_status_lbl.setText("⏳ Đang tìm tunnel local, Tailscale và xác thực Mininet VM...")
         self.network_status_lbl.setStyleSheet("color: #FBBF24; font-size: 12.5px; font-weight: 600;")
         worker = NetworkDiscoveryWorker(self)
         self.network_worker = worker
@@ -1071,9 +1071,20 @@ class SettingsPage(QScrollArea):
                 self.server_config.save(result.server_ip, port)
             path = sync_traffic_generator_config(result, port)
             if self.mitigation_service is not None:
-                if self.mitigation_service.client.host != result.vm_ip:
-                    self.mitigation_service.client.close()
-                    self.mitigation_service.client.host = result.vm_ip
+                client = self.mitigation_service.client
+                connection_changed = (
+                    client.host != result.vm_ip
+                    or client.user != result.vm_user
+                    or client.agent_port != result.agent_port
+                    or client.direct_url != result.agent_url
+                )
+                if connection_changed:
+                    client.configure(
+                        host=result.vm_ip,
+                        user=result.vm_user,
+                        agent_port=result.agent_port,
+                        direct_url=result.agent_url,
+                    )
                 self.mitigation_service.refresh_async()
             if self.web_server is not None:
                 if server_changed and self.web_server.is_running:
@@ -1086,14 +1097,28 @@ class SettingsPage(QScrollArea):
         self.server_ip.setText(result.server_ip)
         self.detected_server_ip.setText(result.server_ip)
         self.detected_vm_ip.setText(result.vm_ip)
-        self.vm_identity.setText(f"{result.vm_hostname} · SSH xác thực · agent 9000")
-        self.network_status_lbl.setText("● Đã đồng bộ IDS/IPS, Traffic Generator và IPS client")
+        source_names = {
+            "local_tunnel": "tunnel local",
+            "tailscale": "Tailscale",
+            "environment": "biến môi trường",
+            "saved": "cấu hình đã lưu",
+            "vmware_dhcp": "VMware DHCP",
+            "vmware_arp": "VMware ARP",
+        }
+        source = source_names.get(result.connection_source, result.connection_source)
+        self.vm_identity.setText(
+            f"{result.vm_hostname} · {result.vm_user} · agent {result.agent_port} · {source}"
+        )
+        self.network_status_lbl.setText("● IDS/IPS và IPS client đã tự cấu hình")
         self.network_status_lbl.setStyleSheet("color: #34D399; font-size: 12.5px; font-weight: 600;")
-        self.network_status_lbl.setToolTip(str(path))
-        self.show_status(f"✓ DHCP: IDS {result.server_ip} · VM {result.vm_ip}", True)
+        self.network_status_lbl.setToolTip(
+            f"Traffic Generator: {path}" if path else
+            "Traffic Generator chạy trên máy khác; hãy dùng IP IDS/IPS hiển thị ở đây."
+        )
+        self.show_status(f"✓ {source}: IDS {result.server_ip} · VM {result.vm_ip}", True)
 
     def _network_discovery_failed(self, message: str) -> None:
-        self.network_status_lbl.setText("● Không thể tự cấu hình DHCP")
+        self.network_status_lbl.setText("● Không thể tự cấu hình kết nối Mininet")
         self.network_status_lbl.setToolTip(message)
         self.network_status_lbl.setStyleSheet("color: #FF5B79; font-size: 12.5px; font-weight: 600;")
         self.show_status(f"✕ {message}", False)

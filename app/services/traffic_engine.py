@@ -100,16 +100,11 @@ class TrafficEngine:
                 next_batch = time.monotonic() + 1.0
 
     def _current_rate(self, config: TrafficConfig, elapsed: float) -> int:
-        if config.scenario != "BURST":
-            return config.packet_rate
-        progress = min(1.0, elapsed / max(1, config.duration))
-        if progress < 0.25:
-            factor = 0.5 + progress * 2
-        elif progress < 0.75:
-            factor = 2.0
-        else:
-            factor = max(0.5, 2.0 - (progress - 0.75) * 6)
-        return max(1, min(1_000, int(config.packet_rate * factor)))
+        if config.scenario == "CUSTOM" and config.custom_pattern == "RATE_BURST":
+            progress = min(1.0, elapsed / config.duration)
+            factor = 0.5 if progress < 0.2 else 2.0 if progress < 0.75 else 0.75
+            return max(1, min(1000, int(config.packet_rate * factor)))
+        return config.packet_rate
 
     def _run_packet_stream(
         self,
@@ -203,7 +198,9 @@ class TrafficEngine:
         error_message = ""
         try:
             status_callback("Running")
-            if config.scenario == "CONNECTION_BURST":
+            if config.scenario == "CONNECTION_BURST" or (
+                config.scenario == "CUSTOM" and config.custom_pattern == "CONNECTION_BURST"
+            ):
                 if config.protocol != "TCP":
                     raise ValueError("Connection Burst chỉ hỗ trợ TCP")
                 self._run_connection_burst(config, stats, started, stats_callback)

@@ -15,7 +15,7 @@ class ApiResult:
     ok: bool
     status_code: int | None
     message: str
-    data: dict[str, Any] | None = None
+    data: dict[str, Any] | list[dict[str, Any]] | None = None
 
 
 class ApiClient:
@@ -29,7 +29,7 @@ class ApiClient:
         self.timeout = timeout
         self.api_key = api_key
 
-    def _request(self, method: str, endpoint: str, payload: dict[str, Any] | None = None) -> ApiResult:
+    def _request(self, method: str, endpoint: str, payload: dict[str, Any] | list[dict[str, Any]] | None = None) -> ApiResult:
         headers = {"Accept": "application/json"}
         body = None
         if payload is not None:
@@ -50,7 +50,12 @@ class ApiClient:
                 data = json.loads(content) if content else {}
                 return ApiResult(True, response.status, "Connected Successfully", data)
         except urllib.error.HTTPError as exc:
-            return ApiResult(False, exc.code, f"HTTP Error {exc.code}")
+            try:
+                detail = json.loads(exc.read().decode("utf-8", "replace")).get("detail")
+            except (ValueError, UnicodeDecodeError, OSError, AttributeError):
+                detail = None
+            message = f"HTTP Error {exc.code}: {detail}" if detail else f"HTTP Error {exc.code}"
+            return ApiResult(False, exc.code, message)
         except (TimeoutError, socket.timeout):
             return ApiResult(False, None, "Timeout")
         except urllib.error.URLError as exc:
@@ -75,3 +80,9 @@ class ApiClient:
 
     def traffic_statistics(self) -> ApiResult:
         return self._request("GET", "/api/traffic/statistics")
+
+    def ingest_flow(self, flow: dict[str, Any]) -> ApiResult:
+        return self._request("POST", "/api/flows", flow)
+
+    def ingest_flows(self, flows: list[dict[str, Any]]) -> ApiResult:
+        return self._request("POST", "/api/flows", flows)

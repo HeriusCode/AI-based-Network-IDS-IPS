@@ -6,37 +6,13 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QGridLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app.ui.widgets import Card
+from app.utils.constants import SCENARIO_PRESETS
 
 
 class ScenariosPage(QWidget):
     scenario_selected = Signal(str)
 
-    SCENARIOS = (
-        (
-            "Normal Traffic",
-            "NORMAL",
-            "TCP/UDP ổn định ở tốc độ cấu hình. Phù hợp tạo baseline lưu lượng bình thường.",
-            "#34D399",
-        ),
-        (
-            "Traffic Burst",
-            "BURST",
-            "Tăng tốc theo ba giai đoạn: khởi động, tải cao giới hạn và giảm tải.",
-            "#FBBF24",
-        ),
-        (
-            "Connection Burst",
-            "CONNECTION_BURST",
-            "Tạo một số lượng kết nối TCP đồng thời có giới hạn và tự động đóng.",
-            "#FB7185",
-        ),
-        (
-            "Custom Traffic",
-            "CUSTOM",
-            "Tự chọn protocol, IP, port, thời lượng, packet rate và packet size.",
-            "#A78BFA",
-        ),
-    )
+    SCENARIOS = SCENARIO_PRESETS
 
     def __init__(self) -> None:
         super().__init__()
@@ -52,16 +28,21 @@ class ScenariosPage(QWidget):
 
         grid = QGridLayout()
         grid.setSpacing(14)
-        for index, (name, code, description, color) in enumerate(self.SCENARIOS):
-            card = Card(name)
+        for index, (code, preset) in enumerate(self.SCENARIOS.items()):
+            card = Card(str(preset["title"]))
             tag = QLabel(f"●  {code}")
-            tag.setStyleSheet(f"color: {color}; font-weight: 800; font-size: 12px;")
+            tag.setStyleSheet(f"color: {preset['color']}; font-weight: 800; font-size: 12px;")
             card.box.addWidget(tag)
-            text = QLabel(description)
+            text = QLabel(str(preset["description"]))
             text.setObjectName("muted")
             text.setWordWrap(True)
             card.box.addWidget(text)
-            constraints = QLabel("Tự dừng khi hết thời gian · STOP tức thời · Không cho phép IP công cộng")
+            constraints = QLabel(
+                f"{preset['protocol']} · {preset['duration']} giây · "
+                f"{preset['packet_rate']} lần/s · "
+                f"{('h1+h2' if code == 'DDOS' else preset['source'])} → {preset['target']} · "
+                f"port {preset.get('port', 'tùy chọn')} · AI: {preset.get('expected_label', '—')}"
+            )
             constraints.setObjectName("hint")
             constraints.setWordWrap(True)
             card.box.addWidget(constraints)

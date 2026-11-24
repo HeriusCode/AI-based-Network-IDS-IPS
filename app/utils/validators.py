@@ -6,7 +6,7 @@ import ipaddress
 from collections.abc import Iterable
 
 from app.models.traffic_config import TrafficConfig
-from app.utils.constants import MAX_PORT, MIN_PORT
+from app.utils.constants import MAX_PORT, MIN_PORT, PORT_SCAN_PORTS
 
 
 class ValidationError(ValueError):
@@ -59,4 +59,6 @@ def validate_traffic_config(
         raise ValidationError("; ".join(errors))
     validate_lab_target(config.destination_ip, allowed_networks)
     validate_port(config.destination_port, approved_ports, config.protocol)
+    if config.scenario == "PORT_SCAN" and len(set(map(int, approved_ports)) & set(PORT_SCAN_PORTS)) < 2:
+        raise ValidationError("Port Scan cần ít nhất hai port lab được phê duyệt")
     return config

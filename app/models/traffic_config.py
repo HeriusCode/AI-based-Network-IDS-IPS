@@ -15,6 +15,8 @@ from app.utils.constants import (
     MIN_PACKET_SIZE,
     SUPPORTED_PROTOCOLS,
     SUPPORTED_SCENARIOS,
+    SCENARIO_PROTOCOLS,
+    CUSTOM_PATTERNS,
 )
 
 
@@ -30,6 +32,7 @@ class TrafficConfig:
     number_connections: int = 10
     source_host: str = "Local"
     target_host: str = "Local"
+    custom_pattern: str = "CONSTANT"
 
     def normalized(self) -> "TrafficConfig":
         self.destination_ip = self.destination_ip.strip()
@@ -37,6 +40,7 @@ class TrafficConfig:
         self.scenario = self.scenario.strip().upper()
         self.source_host = self.source_host.strip() or "Local"
         self.target_host = self.target_host.strip() or "Local"
+        self.custom_pattern = self.custom_pattern.strip().upper()
         return self
 
     def validate_ranges(self) -> list[str]:
@@ -53,8 +57,17 @@ class TrafficConfig:
             errors.append(f"Kích thước gói phải từ {MIN_PACKET_SIZE} đến {MAX_PACKET_SIZE} byte")
         if not MIN_CONNECTIONS <= self.number_connections <= MAX_CONNECTIONS:
             errors.append(f"Số kết nối phải từ {MIN_CONNECTIONS} đến {MAX_CONNECTIONS}")
-        if self.protocol != "TCP" and self.scenario == "CONNECTION_BURST":
-            errors.append("Connection Burst chỉ hỗ trợ TCP")
+        if self.scenario in SCENARIO_PROTOCOLS and self.protocol not in SCENARIO_PROTOCOLS[self.scenario]:
+            errors.append(f"Kịch bản {self.scenario} không hỗ trợ {self.protocol}")
+        if self.scenario == "CUSTOM":
+            if self.custom_pattern not in CUSTOM_PATTERNS:
+                errors.append(f"Custom pattern phải thuộc: {', '.join(CUSTOM_PATTERNS)}")
+            elif self.custom_pattern == "RATE_BURST" and self.protocol not in {"UDP", "ICMP"}:
+                errors.append("Rate Burst tùy chỉnh chỉ hỗ trợ UDP hoặc ICMP")
+            elif self.custom_pattern == "CONNECTION_BURST" and self.protocol != "TCP":
+                errors.append("Connection Burst tùy chỉnh chỉ hỗ trợ TCP")
+        if self.scenario != "NORMAL" and (self.source_host == "Local" or self.target_host == "Local"):
+            errors.append("Kịch bản mô phỏng tấn công cần hai host Mininet")
         return errors
 
     def to_dict(self) -> dict[str, object]:

@@ -212,7 +212,10 @@ QTableWidget::item { padding: 7px; border-bottom: 1px solid #17283F; }
 QScrollArea { border: none; background: transparent; }
 QScrollArea#dashboardScroll,
 QScrollArea#dashboardScroll QWidget#qt_scrollarea_viewport,
-#dashboardContent { background: #0A1020; }
+#dashboardContent,
+QScrollArea#connectionScroll,
+QScrollArea#connectionScroll QWidget#qt_scrollarea_viewport,
+#connectionContent { background: #0A1020; }
 QScrollBar:vertical { background: #0A1020; width: 10px; }
 QScrollBar::handle:vertical { background: #2C4262; border-radius: 5px; min-height: 32px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }

@@ -1,0 +1,14 @@
+[Unit]
+Description=Mininet traffic agent for Traffic Generator
+After=network.target openvswitch-switch.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/ai-network-ids-ips
+ExecStart=/root/ai-network-ids-ips/api-venv/bin/python3 -m uvicorn vm_agent.mininet_agent:app --host 127.0.0.1 --port 9000
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

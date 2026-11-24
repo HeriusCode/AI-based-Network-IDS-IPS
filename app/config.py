@@ -14,6 +14,9 @@ from app.utils.constants import DEFAULT_ALLOWED_NETWORKS, DEFAULT_APPROVED_PORTS
 class AppConfig:
     server_ip: str = "127.0.0.1"
     api_port: int = 8000
+    vm_ip: str = "192.168.201.130"
+    vm_ssh_user: str = "root"
+    vm_agent_port: int = 9000
     connection_timeout: float = 3.0
     default_duration: int = 30
     default_packet_rate: int = 100

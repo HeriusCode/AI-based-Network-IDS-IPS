@@ -14,6 +14,8 @@ from app.services.ips_client import IpsClient
 
 class MitigationService(QObject):
     snapshot_changed = Signal(object)
+    topology_changed = Signal(object)
+    topology_error = Signal(str)
     action_completed = Signal(bool, str)
     error = Signal(str)
 
@@ -52,6 +54,23 @@ class MitigationService(QObject):
     def refresh_async(self) -> None:
         self._background(lambda: None, refresh=True)
 
+    def refresh_topology_async(self) -> None:
+        """Fetch Mininet/OVS topology without queuing behind another active IPS operation."""
+        def run() -> None:
+            if not self._operation_lock.acquire(blocking=False):
+                return
+            try:
+                topology = self.client.topology()
+                self.connected = True
+                self.topology_changed.emit(topology)
+            except Exception as exc:
+                self.connected = False
+                self.topology_error.emit(str(exc))
+            finally:
+                self._operation_lock.release()
+
+        threading.Thread(target=run, name="topology-service", daemon=True).start()
+
     def set_enabled_async(self, enabled: bool) -> None:
         def operation() -> None:
             self.client.set_enabled(enabled)
@@ -68,10 +87,20 @@ class MitigationService(QObject):
                          success_message="Đã gỡ chính sách khỏi Open vSwitch")
 
     def block_ip_async(self, source_ip: str, *, reason: str = "Analyst block from detection") -> None:
-        self.add_rule_async({
-            "action": "block_ip", "source_ip": source_ip, "protocol": "any",
-            "duration": 60, "reason": reason, "origin": "analyst",
-        }, f"Đã chặn {source_ip} trong 60 giây")
+        def operation() -> None:
+            if not self.enabled:
+                self.client.set_enabled(True)
+                self.enabled = True
+            self.client.add_rule({
+                "action": "block_ip", "source_ip": source_ip, "protocol": "any",
+                "duration": 60, "reason": reason, "origin": "analyst",
+            })
+
+        self._background(
+            operation,
+            refresh=True,
+            success_message=f"Đã chặn {source_ip} trong 60 giây",
+        )
 
     @staticmethod
     def policy_for(flow: dict[str, Any]) -> dict[str, Any] | None:

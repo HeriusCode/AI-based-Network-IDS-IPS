@@ -63,6 +63,7 @@ class LiveDetectionService(QObject):
         bytes_per_second = 0.0
         observed_at = time.monotonic()
         for index, (flow, prediction) in enumerate(zip(flows, predictions, strict=True)):
+            features = flow["features"]
             classification = classifications.get(index, {})
             if (
                 str(classification.get("label", "")).lower() == "benign"
@@ -79,6 +80,9 @@ class LiveDetectionService(QObject):
                 "destination_port": int(flow.get("destination_port", 0)),
                 "protocol": str(flow.get("protocol", "")),
                 "packets": int(flow.get("packets", 0)),
+                "flow_duration_us": float(features.get("Flow Duration", 0) or 0),
+                "bytes_per_second": float(features.get("Flow Bytes/s", 0) or 0),
+                "packets_per_second": float(features.get("Flow Packets/s", 0) or 0),
                 "feature_quality": str(flow.get("feature_quality", "approximate")),
                 "label": str(prediction.get("label", "")),
                 "attack_score": float(prediction.get("attack_score", 0)),
@@ -88,7 +92,6 @@ class LiveDetectionService(QObject):
                 "model_version": str(detection.get("model_version", "unknown")),
             }
             key = f"{result['session_id']}:{result['flow_id']}"
-            features = flow["features"]
             packet_count = max(0, int(flow.get("packets", 0)))
             byte_count = max(
                 0.0,

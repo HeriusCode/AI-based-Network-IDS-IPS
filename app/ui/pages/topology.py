@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import socket
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal, QTimer
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.icons import icon
+from app.services.mitigation_service import MitigationService
 from app.services.network_metrics import NetworkMetricsCollector, NetworkSnapshot
 from app.ui.pages.dashboard import make_badge_cell, make_text_cell
 from app.ui.pages.monitoring import Chart, MetricCard, MonitorMetric, Panel, legend_chip
@@ -147,8 +148,175 @@ def _load_operating_system_topology(snapshot: NetworkSnapshot) -> None:
     DEVICE_TRAFFIC_SERIES = traffic
 
 
+def _load_sdn_topology(payload: dict) -> None:
+    """Load nodes and links reported by the Mininet agent into the canvas model."""
+    global DEVICES, DEVICE_TRAFFIC_SERIES, TOPOLOGY_LINKS
+
+    raw_nodes = [item for item in payload.get("nodes", []) if isinstance(item, dict) and item.get("id")]
+    raw_links = [item for item in payload.get("links", []) if isinstance(item, dict)]
+    if not raw_nodes:
+        raise ValueError("Topology Mininet không có node")
+    previous_traffic = DEVICE_TRAFFIC_SERIES
+    groups = {
+        "controller": [item for item in raw_nodes if item.get("type") == "controller"],
+        "switch": [item for item in raw_nodes if item.get("type") == "switch"],
+        "host": [item for item in raw_nodes if item.get("type") == "host"],
+    }
+    groups["other"] = [
+        item for item in raw_nodes if item.get("type") not in {"controller", "switch", "host"}
+    ]
+    layout = {
+        "controller": (85.0, groups["controller"]),
+        "switch": (245.0, groups["switch"]),
+        "host": (415.0, groups["host"]),
+        "other": (330.0, groups["other"]),
+    }
+    positions: dict[str, tuple[float, float]] = {}
+    for _kind, (y, items) in layout.items():
+        count = len(items)
+        for index, item in enumerate(items):
+            x = 470.0 if count == 1 else 170.0 + 600.0 * index / max(1, count - 1)
+            positions[str(item["id"])] = (x, y)
+
+    kind_names = {
+        "controller": "SDN Controller",
+        "switch": "Open vSwitch",
+        "host": "Mininet host",
+    }
+    icons = {"controller": "server", "switch": "switch", "host": "monitor"}
+    colors = {"controller": "#A78BFA", "switch": "#3B82F6", "host": "#10B981"}
+    statuses = {"online": "Trực tuyến", "offline": "Ngoại tuyến", "degraded": "Suy giảm"}
+    devices: list[Device] = []
+    traffic: dict[str, tuple[list[tuple[list[float], str]], int, str, str]] = {}
+    for node in raw_nodes:
+        key = str(node["id"])
+        node_type = str(node.get("type") or "other")
+        incoming_mbps = max(0.0, float(node.get("rx_bps", 0) or 0)) / 1_000_000
+        outgoing_mbps = max(0.0, float(node.get("tx_bps", 0) or 0)) / 1_000_000
+        incoming = f"{incoming_mbps:.3f} Mbps"
+        outgoing = f"{outgoing_mbps:.3f} Mbps"
+        x, y = positions.get(key, (470.0, 330.0))
+        devices.append(Device(
+            key=key,
+            name=str(node.get("name") or key),
+            ip=str(node.get("ip") or "—"),
+            kind=kind_names.get(node_type, str(node_type).title()),
+            icon_name=icons.get(node_type, "nodes"),
+            color=colors.get(node_type, "#F59E0B"),
+            x=x,
+            y=y,
+            mac=str(node.get("mac") or "—"),
+            openflow=str(node.get("openflow") or "Không áp dụng"),
+            ports=f"{int(node.get('port_count', 0) or 0)} cổng",
+            flows=f"{int(node.get('flow_count', 0) or 0)} flow",
+            incoming=incoming,
+            outgoing=outgoing,
+            status=statuses.get(str(node.get("status") or "offline"), "Không xác định"),
+        ))
+        series = previous_traffic.get(
+            key, ([([0.0] * 32, "#3B82F6"), ([0.0] * 32, "#10B981")], 1, "", "")
+        )[0]
+        series[0][0].append(incoming_mbps)
+        del series[0][0][0]
+        series[1][0].append(outgoing_mbps)
+        del series[1][0][0]
+        traffic[key] = (
+            series,
+            max(1, int(max(max(series[0][0]), max(series[1][0])) * 1.25)),
+            incoming,
+            outgoing,
+        )
+
+    known = {device.key for device in devices}
+    links: list[tuple[str, str, str, Qt.PenStyle, str, float]] = []
+    for item in raw_links:
+        source, target = str(item.get("source") or ""), str(item.get("target") or "")
+        if source not in known or target not in known:
+            continue
+        online = item.get("status") == "online"
+        control = item.get("type") == "control"
+        label = str(item.get("label") or ("OpenFlow" if control else "Link"))
+        links.append((
+            source,
+            target,
+            "#A78BFA" if control and online else "#38BDF8" if online else "#64748B",
+            Qt.PenStyle.DashLine if control else Qt.PenStyle.SolidLine,
+            label,
+            2.2 if online else 1.2,
+        ))
+    DEVICES = devices
+    TOPOLOGY_LINKS = links
+    DEVICE_TRAFFIC_SERIES = traffic
+
+
+def _load_combined_topology(snapshot: NetworkSnapshot, payload: dict) -> None:
+    """Merge local Windows interfaces with the live Mininet/OVS topology."""
+    global DEVICES, DEVICE_TRAFFIC_SERIES, TOPOLOGY_LINKS
+
+    _load_operating_system_topology(snapshot)
+    local_devices = list(DEVICES)
+    local_links = list(TOPOLOGY_LINKS)
+    local_traffic = dict(DEVICE_TRAFFIC_SERIES)
+    arranged_local: list[Device] = []
+    interface_index = 0
+    for index, device in enumerate(local_devices):
+        if device.key == "local-host":
+            arranged_local.append(replace(device, x=260.0, y=70.0))
+            continue
+        column = interface_index % 3
+        row = interface_index // 3
+        interface_index += 1
+        arranged_local.append(replace(
+            device,
+            x=90.0 + 170.0 * column,
+            y=210.0 + 115.0 * row,
+        ))
+
+    _load_sdn_topology(payload)
+    sdn_devices = list(DEVICES)
+    sdn_links = list(TOPOLOGY_LINKS)
+    sdn_traffic = dict(DEVICE_TRAFFIC_SERIES)
+    groups = {
+        "SDN Controller": [item for item in sdn_devices if item.kind == "SDN Controller"],
+        "Open vSwitch": [item for item in sdn_devices if item.kind == "Open vSwitch"],
+        "Mininet host": [item for item in sdn_devices if item.kind == "Mininet host"],
+    }
+    arranged_sdn: list[Device] = []
+    for kind, items in groups.items():
+        y = {"SDN Controller": 70.0, "Open vSwitch": 245.0, "Mininet host": 420.0}[kind]
+        count = len(items)
+        for index, device in enumerate(items):
+            x = 700.0 if count == 1 else 550.0 + 300.0 * index / max(1, count - 1)
+            arranged_sdn.append(replace(device, x=x, y=y))
+    arranged_ids = {item.key for item in arranged_sdn}
+    arranged_sdn.extend(item for item in sdn_devices if item.key not in arranged_ids)
+
+    management_link: list[tuple[str, str, str, Qt.PenStyle, str, float]] = []
+    if any(item.key == "local-host" for item in arranged_local) and any(
+        item.key == "os-ken" for item in arranged_sdn
+    ):
+        management_link.append((
+            "local-host", "os-ken", "#F59E0B", Qt.PenStyle.DashLine,
+            "SSH tunnel\nAPI 9000", 1.8,
+        ))
+    local_status = {device.key: device.status for device in arranged_local}
+    clean_local_links = [
+        (
+            source, target,
+            color if local_status.get(target) == "Trực tuyến" else "#475569",
+            style if local_status.get(target) == "Trực tuyến" else Qt.PenStyle.DashLine,
+            "", 1.3,
+        )
+        for source, target, color, style, _text, _thickness in local_links
+    ]
+    DEVICES = [*arranged_local, *arranged_sdn]
+    TOPOLOGY_LINKS = [*clean_local_links, *management_link, *sdn_links]
+    DEVICE_TRAFFIC_SERIES = {**local_traffic, **sdn_traffic}
+
+
 class TopologyCanvas(QWidget):
     node_selected = Signal(str)
+    node_moved = Signal(str, float, float)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -162,6 +330,10 @@ class TopologyCanvas(QWidget):
         self._drag_origin: QPointF | None = None
         self._pan_origin = QPointF(0.0, 0.0)
         self._dragging = False
+        self.node_positions: dict[str, QPointF] = {}
+        self._node_drag_key = ""
+        self._node_drag_origin: QPointF | None = None
+        self._node_position_origin = QPointF()
         self.setMouseTracking(True)
 
     def zoom_in(self) -> None:
@@ -175,7 +347,16 @@ class TopologyCanvas(QWidget):
     def reset_layout(self) -> None:
         self.zoom = 1.0
         self.pan = QPointF(0.0, 0.0)
+        self.node_positions.clear()
         self.update()
+
+    def _projection(self) -> tuple[float, float, float]:
+        scale = min(self.width() / 940, self.height() / 500) * self.zoom
+        return (
+            scale,
+            (self.width() - 940 * scale) / 2 + self.pan.x(),
+            (self.height() - 500 * scale) / 2 + self.pan.y(),
+        )
 
     def _set_zoom(self, value: float, anchor: QPointF) -> None:
         old_zoom = self.zoom
@@ -194,6 +375,15 @@ class TopologyCanvas(QWidget):
         event.accept()
 
     def mouseMoveEvent(self, event) -> None:
+        if self._node_drag_key and self._node_drag_origin is not None:
+            scale, _offset_x, _offset_y = self._projection()
+            delta = (event.position() - self._node_drag_origin) / max(0.001, scale)
+            position = self._node_position_origin + delta
+            self.node_positions[self._node_drag_key] = position
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.update()
+            event.accept()
+            return
         if self._dragging and self._drag_origin is not None:
             self.pan = self._pan_origin + event.position() - self._drag_origin
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -203,7 +393,7 @@ class TopologyCanvas(QWidget):
         pos = event.position()
         hovered = any(rect.contains(pos) for rect in self._node_rects.values())
         if hovered:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
         else:
             self.setCursor(Qt.CursorShape.OpenHandCursor)
         super().mouseMoveEvent(event)
@@ -215,6 +405,14 @@ class TopologyCanvas(QWidget):
                 if rect.contains(pos):
                     self.selected = key
                     self.node_selected.emit(key)
+                    device = next((item for item in DEVICES if item.key == key), None)
+                    if device is not None:
+                        self._node_drag_key = key
+                        self._node_drag_origin = QPointF(pos)
+                        self._node_position_origin = QPointF(
+                            self.node_positions.get(key, QPointF(device.x, device.y))
+                        )
+                        self.setCursor(Qt.CursorShape.ClosedHandCursor)
                     self.update()
                     event.accept()
                     return
@@ -227,6 +425,15 @@ class TopologyCanvas(QWidget):
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._node_drag_key:
+            key = self._node_drag_key
+            position = self.node_positions.get(key, self._node_position_origin)
+            self._node_drag_key = ""
+            self._node_drag_origin = None
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+            self.node_moved.emit(key, position.x(), position.y())
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton and self._dragging:
             self._dragging = False
             self._drag_origin = None
@@ -250,14 +457,22 @@ class TopologyCanvas(QWidget):
             painter.drawLine(0, y, self.width(), y)
 
         # 2. Scale & Center projection
-        scale = min(self.width() / 940, self.height() / 500) * self.zoom
-        offset_x = (self.width() - 940 * scale) / 2 + self.pan.x()
-        offset_y = (self.height() - 500 * scale) / 2 + self.pan.y()
+        scale, offset_x, offset_y = self._projection()
 
         def point(x: float, y: float) -> QPointF:
             return QPointF(offset_x + x * scale, offset_y + y * scale)
 
-        positions = {device.key: point(device.x, device.y) for device in DEVICES}
+        active_keys = {device.key for device in DEVICES}
+        self.node_positions = {
+            key: value for key, value in self.node_positions.items() if key in active_keys
+        }
+        positions = {
+            device.key: point(
+                self.node_positions.get(device.key, QPointF(device.x, device.y)).x(),
+                self.node_positions.get(device.key, QPointF(device.x, device.y)).y(),
+            )
+            for device in DEVICES
+        }
 
         # 3. Network Links
         for source, target, color_str, style, text, thickness in TOPOLOGY_LINKS:
@@ -275,18 +490,18 @@ class TopologyCanvas(QWidget):
             painter.setPen(QPen(QColor(color_str), max(2, int(thickness * scale)), style))
             painter.drawLine(start, end)
 
-            # Bandwidth & status badge
-            center = (start + end) / 2
-            bw = 92 * scale
-            bh = 30 * scale
-            badge_rect = QRectF(center.x() - bw / 2, center.y() - bh / 2, bw, bh)
-            painter.setPen(QPen(QColor("#2E2760"), 1))
-            painter.setBrush(QColor(22, 19, 48, 230))
-            painter.drawRoundedRect(badge_rect, 6 * scale, 6 * scale)
+            if text:
+                center = (start + end) / 2
+                bw = 92 * scale
+                bh = 30 * scale
+                badge_rect = QRectF(center.x() - bw / 2, center.y() - bh / 2, bw, bh)
+                painter.setPen(QPen(QColor("#2E2760"), 1))
+                painter.setBrush(QColor(22, 19, 48, 230))
+                painter.drawRoundedRect(badge_rect, 6 * scale, 6 * scale)
 
-            painter.setPen(QColor("#E2E8F0"))
-            painter.setFont(QFont("Segoe UI", max(7, int(8 * scale)), QFont.Weight.DemiBold))
-            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, text)
+                painter.setPen(QColor("#E2E8F0"))
+                painter.setFont(QFont("Segoe UI", max(7, int(8 * scale)), QFont.Weight.DemiBold))
+                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, text)
 
         # 4. Draw Device Nodes
         self._node_rects.clear()
@@ -294,8 +509,11 @@ class TopologyCanvas(QWidget):
             center = positions[device.key]
             card_w = 172 * scale
             card_h = 70 * scale
-            if device.key in ("firewall", "internet"):
-                card_w = 148 * scale
+            if device.kind == "Giao diện mạng hệ điều hành":
+                card_w = 150 * scale
+                card_h = 64 * scale
+            elif device.kind == "Mininet host":
+                card_w = 150 * scale
 
             rect = QRectF(center.x() - card_w / 2, center.y() - card_h / 2, card_w, card_h)
             self._node_rects[device.key] = rect
@@ -317,7 +535,7 @@ class TopologyCanvas(QWidget):
             painter.drawRoundedRect(rect, 12 * scale, 12 * scale)
 
             # Icon badge box
-            ib_size = 48 * scale
+            ib_size = (42 if device.kind == "Giao diện mạng hệ điều hành" else 48) * scale
             icon_box = QRectF(rect.left() + 9 * scale, rect.top() + 11 * scale, ib_size, ib_size)
             tint = QColor(device.color)
             tint.setAlpha(35)
@@ -336,10 +554,13 @@ class TopologyCanvas(QWidget):
             painter.setPen(QColor("#FFFFFF"))
             name_font = QFont("Segoe UI", max(8, int(9.5 * scale)), QFont.Weight.Bold)
             painter.setFont(name_font)
+            display_name = painter.fontMetrics().elidedText(
+                device.name, Qt.TextElideMode.ElideRight, max(1, int(text_w))
+            )
             painter.drawText(
                 QRectF(text_x, rect.top() + 9 * scale, text_w, 18 * scale),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                device.name,
+                display_name,
             )
 
             # IP
@@ -363,18 +584,6 @@ class TopologyCanvas(QWidget):
                 f"● {device.status}",
             )
 
-        # 5. Canvas interaction help.
-        legend_box = QRectF(14, 14, 250, 66)
-        painter.setPen(QPen(QColor("#2E2760"), 1))
-        painter.setBrush(QColor(19, 17, 43, 230))
-        painter.drawRoundedRect(legend_box, 10, 10)
-
-        painter.setPen(QColor("#C4B5FD"))
-        painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
-        painter.drawText(QRectF(24, 22, 228, 16), "ĐIỀU KHIỂN SƠ ĐỒ")
-        painter.setPen(QColor("#CBD5E1"))
-        painter.setFont(QFont("Segoe UI", 8))
-        painter.drawText(QRectF(24, 42, 228, 18), "Kéo nền để di chuyển  •  Lăn chuột để zoom")
 
 
 class MiniMap(QWidget):
@@ -383,6 +592,7 @@ class MiniMap(QWidget):
         self.setMinimumHeight(115)
         self.setFixedHeight(115)
         self.selected = ""
+        self.node_positions: dict[str, QPointF] = {}
 
     def paintEvent(self, event) -> None:
         del event
@@ -397,7 +607,10 @@ class MiniMap(QWidget):
 
         # Points
         points = {
-            d.key: QPointF(20 + d.x / 940 * (self.width() - 40), 12 + d.y / 500 * (self.height() - 24))
+            d.key: QPointF(
+                20 + self.node_positions.get(d.key, QPointF(d.x, d.y)).x() / 940 * (self.width() - 40),
+                12 + self.node_positions.get(d.key, QPointF(d.x, d.y)).y() / 500 * (self.height() - 24),
+            )
             for d in DEVICES
         }
 
@@ -427,12 +640,18 @@ class MiniMap(QWidget):
 
 
 class TopologyPage(QScrollArea):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        mitigation_service: MitigationService | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("topologyScroll")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.collector = NetworkMetricsCollector()
+        self.mitigation_service = mitigation_service
+        self._source = "operating-system"
         self._last_snapshot = self.collector.sample()
         _load_operating_system_topology(self._last_snapshot)
 
@@ -456,20 +675,20 @@ class TopologyPage(QScrollArea):
         intro.addWidget(heading)
 
         subtitle = QLabel(
-            "Trực quan hóa máy cục bộ và các giao diện mạng do hệ điều hành phát hiện"
+            "Kéo thả từng thẻ để sắp xếp • Kéo nền để di chuyển • Lăn chuột để zoom"
         )
         subtitle.setObjectName("topologySubtitle")
         subtitle.setWordWrap(True)
         intro.addWidget(subtitle)
         header.addLayout(intro, stretch=1)
 
-        status_badge = QLabel("●  DỮ LIỆU HỆ ĐIỀU HÀNH")
-        status_badge.setStyleSheet(
+        self.status_badge = QLabel("●  ĐANG KẾT NỐI MININET / OVS")
+        self.status_badge.setStyleSheet(
             "background: rgba(139, 92, 246, 0.14); color: #C4B5FD; "
             "border: 1px solid rgba(139, 92, 246, 0.35); border-radius: 10px; "
             "padding: 6px 14px; font-weight: 700; font-size: 11px;"
         )
-        header.addWidget(status_badge)
+        header.addWidget(self.status_badge)
 
         mode_label = QLabel("Chế độ:")
         mode_label.setStyleSheet("color: #8E8BA7; font-size: 11px; font-weight: 500;")
@@ -477,10 +696,15 @@ class TopologyPage(QScrollArea):
 
         self.mode_combo = QComboBox()
         self.mode_combo.setObjectName("topologyCombo")
-        self.mode_combo.addItems(["Giao diện hệ điều hành"])
+        self.mode_combo.addItems([
+            "Kết hợp SDN + Hệ điều hành",
+            "Mininet / OVS / OS-Ken",
+            "Hệ điều hành (fallback)",
+        ])
+        self.mode_combo.setEnabled(False)
         header.addWidget(self.mode_combo)
 
-        arrange = QPushButton("Tự động sắp xếp")
+        arrange = QPushButton("Đặt lại bố cục")
         arrange.setObjectName("arrangeButton")
         arrange.setIcon(icon("refresh", "#FFFFFF", 14))
         header.addWidget(arrange)
@@ -529,13 +753,14 @@ class TopologyPage(QScrollArea):
 
         self.canvas = TopologyCanvas()
         self.canvas.node_selected.connect(lambda k: self.select_device(k, source="canvas"))
-        arrange.clicked.connect(self.canvas.reset_layout)
+        arrange.clicked.connect(self._reset_canvas_layout)
         zoom_out.clicked.connect(self.canvas.zoom_out)
         zoom_in.clicked.connect(self.canvas.zoom_in)
-        expand.clicked.connect(self.canvas.reset_layout)
+        expand.clicked.connect(self._reset_canvas_layout)
         upper.addWidget(self.canvas, 0, 0)
 
         upper.addWidget(self._device_panel(), 0, 1)
+        self.canvas.node_moved.connect(self._node_moved)
         upper.setColumnStretch(0, 68)
         upper.setColumnStretch(1, 32)
         root.addLayout(upper)
@@ -558,7 +783,11 @@ class TopologyPage(QScrollArea):
 
         self.live_timer = QTimer(self)
         self.live_timer.timeout.connect(self.refresh_topology_data)
-        self.live_timer.start(1800)
+        self.live_timer.start(3_000)
+        if self.mitigation_service is not None:
+            self.mitigation_service.topology_changed.connect(self._topology_changed)
+            self.mitigation_service.topology_error.connect(self._topology_failed)
+            QTimer.singleShot(0, self.refresh_topology_data)
 
     # -------------------------------------------------------------------------
     # DEVICE INSPECTOR PANEL & MINIMAP
@@ -819,19 +1048,87 @@ class TopologyPage(QScrollArea):
 
         return panel
 
+    def _node_moved(self, key: str, x: float, y: float) -> None:
+        self.minimap.node_positions[key] = QPointF(x, y)
+        self.minimap.update()
+
+    def _reset_canvas_layout(self) -> None:
+        self.canvas.reset_layout()
+        self.minimap.node_positions.clear()
+        self.minimap.update()
+
     def refresh_topology_data(self) -> None:
+        if self.mitigation_service is not None:
+            self.mitigation_service.refresh_topology_async()
+            return
+        snapshot = self.collector.sample()
+        self._last_snapshot = snapshot
+        _load_operating_system_topology(snapshot)
+        self._source = "operating-system"
+        self.status_badge.setText("●  FALLBACK HỆ ĐIỀU HÀNH")
+        self.mode_combo.setCurrentIndex(2)
+        self._render_current_topology()
+
+    def _topology_changed(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            self._topology_failed("Mininet agent trả topology không hợp lệ")
+            return
+        try:
+            snapshot = self.collector.sample()
+            self._last_snapshot = snapshot
+            _load_combined_topology(snapshot, payload)
+        except (TypeError, ValueError) as error:
+            self._topology_failed(str(error))
+            return
+        self._source = "sdn"
+        self.status_badge.setText(
+            "●  LIVE • WINDOWS + MININET + OVS + OS-KEN"
+            if payload.get("status") == "ok"
+            else "●  SDN KẾT NỐI • TOPOLOGY SUY GIẢM"
+        )
+        self.status_badge.setToolTip("\n".join(map(str, payload.get("errors", []))))
+        self.mode_combo.setCurrentIndex(0)
+        self._render_current_topology()
+
+    def _topology_failed(self, message: str) -> None:
         snapshot = self.collector.sample()
         self._last_snapshot = snapshot
         selected_key = self.selected_key
         _load_operating_system_topology(snapshot)
+        self._source = "operating-system"
+        self.status_badge.setText("●  VM KHÔNG KẾT NỐI • FALLBACK HĐH")
+        self.status_badge.setToolTip(message)
+        self.mode_combo.setCurrentIndex(2)
+        self._render_current_topology(selected_key)
 
-        total_mbps = snapshot.incoming_mbps + snapshot.outgoing_mbps
+    def _render_current_topology(self, selected_key: str | None = None) -> None:
+        selected_key = selected_key if selected_key is not None else self.selected_key
+        active_keys = {device.key for device in DEVICES}
+        self.minimap.node_positions = {
+            key: value for key, value in self.minimap.node_positions.items() if key in active_keys
+        }
+        is_sdn = self._source == "sdn"
+        online_count = sum(1 for device in DEVICES if device.status == "Trực tuyến")
+        warning_count = sum(
+            1 for device in DEVICES
+            if device.kind in {"SDN Controller", "Open vSwitch", "Mininet host"}
+            and device.status != "Trực tuyến"
+        ) if is_sdn else 0
+        if is_sdn:
+            measured = [device for device in DEVICES if device.kind == "Mininet host"]
+            total_mbps = sum(
+                float(device.incoming.split()[0]) + float(device.outgoing.split()[0])
+                for device in measured
+            )
+        else:
+            total_mbps = self._last_snapshot.incoming_mbps + self._last_snapshot.outgoing_mbps
+
         values = (
-            (f"{len(DEVICES)}", "HĐH", len(DEVICES)),
-            (f"{sum(1 for item in snapshot.interfaces if item.is_up)}", "Live", len(snapshot.interfaces)),
-            (f"{len(TOPOLOGY_LINKS)}", "Cục bộ", len(TOPOLOGY_LINKS)),
-            (f"{total_mbps:.2f} Mbps", "Live", total_mbps),
-            ("0", "Chưa có nguồn", 0.0),
+            (f"{len(DEVICES)}", "SDN" if is_sdn else "HĐH", len(DEVICES)),
+            (f"{online_count}", "Live", online_count),
+            (f"{len(TOPOLOGY_LINKS)}", "Kết hợp" if is_sdn else "Cục bộ", len(TOPOLOGY_LINKS)),
+            (f"{total_mbps:.3f} Mbps", "Mininet" if is_sdn else "Live", total_mbps),
+            (str(warning_count), "SDN" if is_sdn else "Chưa có nguồn", warning_count),
         )
         for card, (value, change, spark) in zip(self.metric_cards, values):
             card.set_data(value, change, float(spark))
@@ -877,7 +1174,7 @@ class TopologyPage(QScrollArea):
 
         now = datetime.now()
         self.traffic_chart.labels = [
-            (now - timedelta(minutes=2 * (5 - index))).strftime("%H:%M") for index in range(6)
+            (now - timedelta(seconds=3 * (5 - index))).strftime("%H:%M:%S") for index in range(6)
         ]
 
     def _on_combo_index_changed(self, index: int) -> None:

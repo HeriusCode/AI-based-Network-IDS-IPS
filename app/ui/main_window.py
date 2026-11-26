@@ -99,9 +99,15 @@ class MainWindow(QMainWindow):
             ),
             "prediction": lambda: PredictionPage(live_service=self.web_server.live_service),
             "mitigation": lambda: MitigationPage(mitigation_service=self.mitigation_service),
-            "topology": TopologyPage,
-            "alerts": AlertsPage,
-            "reports": ReportsPage,
+            "topology": lambda: TopologyPage(mitigation_service=self.mitigation_service),
+            "alerts": lambda: AlertsPage(
+                live_service=self.web_server.live_service,
+                mitigation_service=self.mitigation_service,
+            ),
+            "reports": lambda: ReportsPage(
+                live_service=self.web_server.live_service,
+                mitigation_service=self.mitigation_service,
+            ),
             "settings": lambda: SettingsPage(
                 server_config=self.server_config_manager,
                 mitigation_service=self.mitigation_service,

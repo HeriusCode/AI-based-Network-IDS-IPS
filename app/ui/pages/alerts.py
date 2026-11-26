@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import csv
+import hashlib
 from datetime import datetime
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -24,6 +28,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.icons import icon
+from app.services.live_detection import LiveDetectionService
+from app.services.mitigation_service import MitigationService
 from app.ui.pages.dashboard import DonutChart, make_badge_cell, make_text_cell
 from app.ui.pages.monitoring import Chart, MetricCard, MonitorMetric, Panel, legend_chip
 
@@ -48,24 +54,41 @@ class AlertTimelineChart(QWidget):
         self.setMinimumHeight(185)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
+    def append_severity(self, severity: str) -> None:
+        mapping = {
+            "Thấp": self.low,
+            "Trung bình": self.medium,
+            "Cao": self.high,
+            "Nghiêm trọng": self.critical,
+        }
+        for values in (self.low, self.medium, self.high, self.critical):
+            values.append(1.0 if values is mapping.get(severity) else 0.0)
+            del values[0]
+        self.update()
+
     def paintEvent(self, event) -> None:
         del event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         chart = QRectF(40, 10, self.width() - 52, self.height() - 34)
+        maximum = max(1.0, max(self.low + self.medium + self.high + self.critical, default=0.0))
 
         # 1. Horizontal gridlines & Y-Axis labels
         painter.setFont(QFont("Segoe UI", 8))
         for step in range(6):
             y = chart.bottom() - chart.height() * step / 5
             painter.setPen(QColor("#8E8BA7"))
-            painter.drawText(QRectF(0, y - 8, 32, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, str(step * 5))
+            painter.drawText(
+                QRectF(0, y - 8, 32, 16),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                f"{maximum * step / 5:.1f}",
+            )
             painter.setPen(QPen(QColor(40, 36, 82, 160), 1, Qt.PenStyle.DashLine))
             painter.drawLine(QPointF(chart.left(), y), QPointF(chart.right(), y))
 
         # 2. X-Axis labels
-        for index, label in enumerate(["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "24:00"]):
+        for index, label in enumerate(["-31", "-24", "-16", "-8", "-4", "-1", "Mới"]):
             x = chart.left() + chart.width() * index / 6
             painter.setPen(QColor("#8E8BA7"))
             painter.drawText(QRectF(x - 24, chart.bottom() + 6, 48, 16), Qt.AlignmentFlag.AlignCenter, label)
@@ -80,7 +103,7 @@ class AlertTimelineChart(QWidget):
 
         for values, color_hex in curves:
             points = [
-                QPointF(chart.left() + chart.width() * i / (len(values) - 1), chart.bottom() - chart.height() * value / 25)
+                QPointF(chart.left() + chart.width() * i / (len(values) - 1), chart.bottom() - chart.height() * value / maximum)
                 for i, value in enumerate(values)
             ]
             path = QPainterPath(points[0])
@@ -107,12 +130,25 @@ class AlertTimelineChart(QWidget):
 
 
 class AlertsPage(QScrollArea):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        live_service: LiveDetectionService | None = None,
+        mitigation_service: MitigationService | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("alertsScroll")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.live_service = live_service
+        self.mitigation_service = mitigation_service
+        self.alert_status: dict[str, str] = {}
+        self._known_alerts: set[str] = set()
+        self._pending_block_alert = ""
+        ALERTS.clear()
+        ALERT_DETAILS.clear()
+        ALERT_TRAFFIC_SERIES.clear()
 
         content = QWidget()
         content.setObjectName("alertsContent")
@@ -140,13 +176,13 @@ class AlertsPage(QScrollArea):
         header.addLayout(intro, stretch=1)
 
         # Status badge
-        status_badge = QLabel("●  CHƯA CÓ NGUỒN CẢNH BÁO")
-        status_badge.setStyleSheet(
+        self.status_badge = QLabel("●  ĐANG CHỜ PHÁT HIỆN LIVE")
+        self.status_badge.setStyleSheet(
             "background: rgba(245, 158, 11, 0.14); color: #FBBF24; "
             "border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 10px; "
             "padding: 6px 14px; font-weight: 700; font-size: 11px;"
         )
-        header.addWidget(status_badge)
+        header.addWidget(self.status_badge)
 
         today = datetime.now().strftime("%d/%m/%Y")
         date_btn = QPushButton(f"  {today} 00:00  →  {today} 23:59  ˅")
@@ -157,6 +193,7 @@ class AlertsPage(QScrollArea):
         export_btn = QPushButton("Xuất CSV")
         export_btn.setObjectName("alertsExport")
         export_btn.setIcon(icon("download", "#FFFFFF", 14))
+        export_btn.clicked.connect(self.export_csv)
         header.addWidget(export_btn)
 
         root.addLayout(header)
@@ -174,8 +211,11 @@ class AlertsPage(QScrollArea):
             MonitorMetric("Đang can thiệp", "0", "Chưa có", "#3B82F6", "activity"),
             MonitorMetric("Đã khắc phục", "0", "Chưa có", "#10B981", "shield"),
         ]
+        self.metric_cards: list[MetricCard] = []
         for column, data in enumerate(metric_data):
-            metrics.addWidget(MetricCard(data), 0, column)
+            card = MetricCard(data)
+            self.metric_cards.append(card)
+            metrics.addWidget(card, 0, column)
             metrics.setColumnStretch(column, 1)
         root.addLayout(metrics)
 
@@ -186,7 +226,7 @@ class AlertsPage(QScrollArea):
         middle.setSpacing(12)
 
         # 3.1 Dòng thời gian cảnh báo 24h
-        timeline = Panel("Số lượng cảnh báo theo thời gian (24 Giờ)")
+        timeline = Panel("Mức độ của 32 cảnh báo gần nhất")
         timeline_legend = QHBoxLayout()
         timeline_legend.setContentsMargins(0, 0, 0, 4)
         timeline_legend.addStretch()
@@ -210,12 +250,14 @@ class AlertsPage(QScrollArea):
         category_legend.setSpacing(6)
         cat_items = [
             ("#FF5B79", "DDoS Attack", "0.0%"),
+            ("#FBBF24", "DoS Attack", "0.0%"),
             ("#F59E0B", "Port Scan", "0.0%"),
             ("#6366F1", "Brute Force", "0.0%"),
             ("#10B981", "Malware C2", "0.0%"),
             ("#8B5CF6", "SQL Injection", "0.0%"),
             ("#94A3B8", "Khác / Anomaly", "0.0%"),
         ]
+        self.category_labels: dict[str, QLabel] = {}
         for color, text, value in cat_items:
             row = QHBoxLayout()
             swatch = QLabel()
@@ -229,6 +271,7 @@ class AlertsPage(QScrollArea):
             row.addStretch()
 
             val_chip = QLabel(value)
+            self.category_labels[text] = val_chip
             val_chip.setStyleSheet("color: #A78BFA; font-weight: 700; font-size: 11px;")
             row.addWidget(val_chip)
             category_legend.addLayout(row)
@@ -266,6 +309,13 @@ class AlertsPage(QScrollArea):
         self.setWidget(content)
 
         self.show_empty_detail()
+        if self.live_service is not None:
+            self.live_service.changed.connect(self._ingest_live_flow)
+            for flow in reversed(self.live_service.snapshot()):
+                self._ingest_live_flow(flow, refresh=False)
+            self._refresh_views()
+        if self.mitigation_service is not None:
+            self.mitigation_service.action_completed.connect(self._mitigation_completed)
 
     # -------------------------------------------------------------------------
     # ALERTS TABLE PANEL (FULL WIDTH)
@@ -296,12 +346,12 @@ class AlertsPage(QScrollArea):
         self.combo_attack.addItems([
             "Tất cả loại tấn công",
             "DDoS Attack",
+            "DoS Attack",
             "Port Scan",
             "Brute Force",
             "SQL Injection",
-            "Malware",
-            "Suspicious Traffic",
-            "Protocol Anomaly",
+            "Malware C2",
+            "Khác / Anomaly",
         ])
         self.combo_attack.currentIndexChanged.connect(self.apply_filters)
         toolbar.addWidget(self.combo_attack)
@@ -462,6 +512,203 @@ class AlertsPage(QScrollArea):
                 visible_count += 1
 
         self.counter_label.setText(f"Hiển thị {visible_count} / {len(ALERTS)} cảnh báo")
+
+    @staticmethod
+    def _attack_category(value: str) -> str:
+        name = value.strip().lower()
+        if "ddos" in name:
+            return "DDoS Attack"
+        if name == "dos" or "denial" in name or "flood" in name:
+            return "DoS Attack"
+        if "port" in name and "scan" in name:
+            return "Port Scan"
+        if "brute" in name:
+            return "Brute Force"
+        if "sql" in name:
+            return "SQL Injection"
+        if any(token in name for token in ("malware", "botnet", "c2")):
+            return "Malware C2"
+        return "Khác / Anomaly"
+
+    @staticmethod
+    def _severity(flow: dict) -> str:
+        risk = str(flow.get("risk_level", "LOW")).upper()
+        score = float(flow.get("attack_score", 0) or 0)
+        if risk == "HIGH":
+            return "Nghiêm trọng" if score >= 0.9 else "Cao"
+        if risk == "MEDIUM":
+            return "Trung bình"
+        return "Thấp"
+
+    @staticmethod
+    def _alert_id(flow: dict) -> str:
+        identity = f"{flow.get('session_id', '')}:{flow.get('flow_id', '')}"
+        return "ALT-" + hashlib.sha1(identity.encode("utf-8")).hexdigest()[:8].upper()
+
+    @staticmethod
+    def _time_text(value: object) -> str:
+        raw = str(value or "")
+        try:
+            moment = datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone()
+            return moment.strftime("%d/%m/%Y %H:%M:%S")
+        except ValueError:
+            return raw or datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+    def _ingest_live_flow(self, flow: object, *, refresh: bool = True) -> None:
+        if not isinstance(flow, dict) or flow.get("label") != "ATTACK":
+            return
+        alert_id = self._alert_id(flow)
+        if alert_id in self._known_alerts:
+            return
+        self._known_alerts.add(alert_id)
+        severity = self._severity(flow)
+        category = self._attack_category(str(flow.get("attack_type") or "Chưa xác định"))
+        score = float(flow.get("attack_score", 0) or 0)
+        type_confidence = float(flow.get("type_confidence", 0) or 0)
+        confidence = type_confidence if type_confidence > 0 else score
+        status = self.alert_status.setdefault(alert_id, "Chưa xử lý")
+        description = (
+            f"AI gắn cờ {category} với attack score {score:.3f}; "
+            f"model {flow.get('model_version', 'unknown')}, feature {flow.get('feature_quality', 'unknown')}."
+        )
+        row = [
+            alert_id,
+            self._time_text(flow.get("timestamp")),
+            str(flow.get("source_ip") or "—"),
+            str(flow.get("destination_ip") or "—"),
+            category,
+            severity,
+            description,
+            status,
+            "Chi tiết",
+        ]
+        duration_us = float(flow.get("flow_duration_us", 0) or 0)
+        bytes_per_second = float(flow.get("bytes_per_second", 0) or 0)
+        observed_mbps = bytes_per_second * 8 / 1_000_000
+        details = {
+            "confidence": f"{confidence * 100:.1f}%",
+            "protocol": str(flow.get("protocol") or "—"),
+            "src_port": str(flow.get("source_port") or "—"),
+            "dst_port": str(flow.get("destination_port") or "—"),
+            "incoming": f"{observed_mbps:.3f} Mbps" if bytes_per_second else "—",
+            "outgoing": "—",
+            "packets": str(int(flow.get("packets", 0) or 0)),
+            "duration": f"{duration_us / 1_000_000:.3f} giây" if duration_us else "—",
+            "analysis": description,
+        }
+        series = [0.0] * 15 + [observed_mbps]
+        ALERTS.insert(0, row)
+        ALERT_DETAILS.insert(0, details)
+        ALERT_TRAFFIC_SERIES.insert(0, ([
+            (list(series), "#FF5B79"), ([0.0] * 16, "#3B82F6")
+        ], max(1, int(observed_mbps * 1.25))))
+        del ALERTS[500:]
+        del ALERT_DETAILS[500:]
+        del ALERT_TRAFFIC_SERIES[500:]
+        self.timeline_chart.append_severity(severity)
+        if refresh:
+            self._refresh_views(select_alert_id=alert_id)
+
+    def _render_alert_row(self, row_index: int, row: list[str]) -> None:
+        self.table.setRowHeight(row_index, 32)
+        colors = ("#A78BFA", "#CBD5E1", "#FFFFFF", "#C4B5FD", "#E2E8F0")
+        for column in range(5):
+            self.table.setCellWidget(
+                row_index, column,
+                make_text_cell(row[column], colors[column], is_mono=column in {0, 2, 3}, is_bold=column in {0, 4}, align_center=column == 0),
+            )
+        severity_colors = {
+            "Nghiêm trọng": ("rgba(255, 91, 121, 0.15)", "#FF5B79", "rgba(255, 91, 121, 0.4)"),
+            "Cao": ("rgba(245, 158, 11, 0.15)", "#F59E0B", "rgba(245, 158, 11, 0.4)"),
+            "Trung bình": ("rgba(251, 191, 36, 0.15)", "#FBBF24", "rgba(251, 191, 36, 0.4)"),
+            "Thấp": ("rgba(56, 189, 248, 0.15)", "#38BDF8", "rgba(56, 189, 248, 0.4)"),
+        }
+        self.table.setCellWidget(row_index, 5, make_badge_cell(row[5], *severity_colors[row[5]]))
+        description = make_text_cell(row[6], "#94A3B8")
+        description.setToolTip(row[6])
+        self.table.setCellWidget(row_index, 6, description)
+        status_colors = {
+            "Đã xử lý": ("rgba(16, 185, 129, 0.15)", "#10B981", "rgba(16, 185, 129, 0.35)"),
+            "Đang xử lý": ("rgba(59, 130, 246, 0.15)", "#60A5FA", "rgba(59, 130, 246, 0.35)"),
+            "Chưa xử lý": ("rgba(245, 158, 11, 0.15)", "#F59E0B", "rgba(245, 158, 11, 0.35)"),
+        }
+        self.table.setCellWidget(row_index, 7, make_badge_cell("● " + row[7], *status_colors[row[7]]))
+        action = QPushButton("Chi tiết")
+        action.setObjectName("smallMonitorButton")
+        action.clicked.connect(lambda _checked=False, index=row_index: self._select_row(index))
+        self.table.setCellWidget(row_index, 8, action)
+
+    def _select_row(self, row: int) -> None:
+        if 0 <= row < len(ALERTS):
+            self.table.selectRow(row)
+            self.update_detail(row)
+
+    def _refresh_views(self, select_alert_id: str = "") -> None:
+        self.table.clearContents()
+        self.table.setRowCount(len(ALERTS))
+        for index, row in enumerate(ALERTS):
+            row[7] = self.alert_status.get(row[0], row[7])
+            self._render_alert_row(index, row)
+        total = len(ALERTS)
+        critical = sum(row[5] == "Nghiêm trọng" for row in ALERTS)
+        high = sum(row[5] == "Cao" for row in ALERTS)
+        intervening = sum(row[7] == "Đang xử lý" for row in ALERTS)
+        resolved = sum(row[7] == "Đã xử lý" for row in ALERTS)
+        values = (
+            (str(total), "AI live", total),
+            (str(critical), "critical", critical),
+            (str(high), "high", high),
+            (str(intervening), "IPS", intervening),
+            (str(resolved), "analyst/IPS", resolved),
+        )
+        for card, (value, change, spark) in zip(self.metric_cards, values):
+            card.set_data(value, change, float(spark))
+        colors = {
+            "DDoS Attack": "#FF5B79", "Port Scan": "#F59E0B",
+            "Brute Force": "#6366F1", "Malware C2": "#10B981",
+            "SQL Injection": "#8B5CF6", "Khác / Anomaly": "#94A3B8",
+            "DoS Attack": "#FBBF24",
+        }
+        counts = {name: sum(row[4] == name for row in ALERTS) for name in colors}
+        segments = [(count * 100 / total, colors[name]) for name, count in counts.items() if count and total]
+        self.category_donut.set_data(segments, str(total), "cảnh báo")
+        for name, label in self.category_labels.items():
+            label.setText(f"{counts.get(name, 0) * 100 / total:.1f}%" if total else "0.0%")
+        self.status_badge.setText(
+            f"●  IDS/IPS LIVE • {total} CẢNH BÁO"
+            if self.live_service is not None and total
+            else "●  ĐANG CHỜ ATTACK LIVE"
+            if self.live_service is not None
+            else "●  CHƯA CÓ NGUỒN CẢNH BÁO"
+        )
+        self.apply_filters()
+        if select_alert_id:
+            index = next((i for i, row in enumerate(ALERTS) if row[0] == select_alert_id), -1)
+            if index >= 0:
+                self._select_row(index)
+                return
+        if ALERTS:
+            self._select_row(0)
+        else:
+            self.show_empty_detail()
+
+    def export_csv(self) -> None:
+        if not ALERTS:
+            QMessageBox.information(self, "Xuất cảnh báo", "Chưa có cảnh báo để xuất.")
+            return
+        default_name = f"security-alerts-{datetime.now():%Y%m%d-%H%M%S}.csv"
+        path, _selected = QFileDialog.getSaveFileName(self, "Xuất cảnh báo CSV", default_name, "CSV files (*.csv)")
+        if not path:
+            return
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["ID", "Thời gian", "IP nguồn", "IP đích", "Loại tấn công", "Mức độ", "Mô tả", "Trạng thái"])
+                writer.writerows(row[:8] for row in ALERTS)
+        except OSError as error:
+            QMessageBox.critical(self, "Không thể xuất CSV", str(error))
+            return
+        QMessageBox.information(self, "Xuất cảnh báo", f"Đã xuất {len(ALERTS)} cảnh báo tới:\n{path}")
 
     # -------------------------------------------------------------------------
     # DETAIL INSPECTOR PANEL (ROW 4 - TRÁI 58%)
@@ -662,9 +909,14 @@ class AlertsPage(QScrollArea):
         # Reset button states based on status
         if st == "Đã xử lý":
             self.block_button.setEnabled(False)
-            self.block_button.setText("IP Đã Chặn")
+            self.block_button.setText("Đã hoàn tất")
             self.resolve_button.setEnabled(False)
             self.resolve_button.setText("Đã xử lý")
+        elif st == "Đang xử lý":
+            self.block_button.setEnabled(False)
+            self.block_button.setText("Đang gửi OS-Ken...")
+            self.resolve_button.setEnabled(False)
+            self.resolve_button.setText("Đang xử lý")
         else:
             self.block_button.setEnabled(True)
             self.block_button.setText("Chặn IP nguồn")
@@ -689,30 +941,36 @@ class AlertsPage(QScrollArea):
         row = self.current_selected_row
         if row < 0 or row >= len(ALERTS):
             return
-        ALERTS[row][7] = "Đã xử lý"
-        self.table.setCellWidget(
-            row,
-            7,
-            make_badge_cell("● Đã xử lý", "rgba(16, 185, 129, 0.15)", "#10B981", "rgba(16, 185, 129, 0.35)"),
-        )
-        self.detail_values["status"].setText("Đã xử lý")
-        self.detail_values["status"].setStyleSheet("color: #10B981; font-weight: 700; font-size: 11px;")
-        self.block_button.setText("Đã chặn IP")
+        if self.mitigation_service is None:
+            QMessageBox.warning(self, "IPS chưa kết nối", "Không có dịch vụ IPS để chặn IP nguồn.")
+            return
+        alert_id, source_ip = ALERTS[row][0], ALERTS[row][2]
+        if source_ip in {"", "—"}:
+            QMessageBox.warning(self, "Không thể chặn", "Cảnh báo không có IP nguồn hợp lệ.")
+            return
+        self._pending_block_alert = alert_id
+        self.alert_status[alert_id] = "Đang xử lý"
+        self._refresh_views(select_alert_id=alert_id)
+        self.block_button.setText("Đang gửi OS-Ken...")
         self.block_button.setEnabled(False)
-        self.resolve_button.setText("Đã xử lý")
-        self.resolve_button.setEnabled(False)
+        self.mitigation_service.block_ip_async(
+            source_ip,
+            reason=f"Security alert {alert_id}: {ALERTS[row][4]}",
+        )
 
     def resolve_alert(self) -> None:
         row = self.current_selected_row
         if row < 0 or row >= len(ALERTS):
             return
-        ALERTS[row][7] = "Đã xử lý"
-        self.table.setCellWidget(
-            row,
-            7,
-            make_badge_cell("● Đã xử lý", "rgba(16, 185, 129, 0.15)", "#10B981", "rgba(16, 185, 129, 0.35)"),
-        )
-        self.detail_values["status"].setText("Đã xử lý")
-        self.detail_values["status"].setStyleSheet("color: #10B981; font-weight: 700; font-size: 11px;")
-        self.resolve_button.setText("Đã xử lý")
-        self.resolve_button.setEnabled(False)
+        alert_id = ALERTS[row][0]
+        self.alert_status[alert_id] = "Đã xử lý"
+        self._refresh_views(select_alert_id=alert_id)
+
+    def _mitigation_completed(self, success: bool, message: str) -> None:
+        alert_id, self._pending_block_alert = self._pending_block_alert, ""
+        if not alert_id:
+            return
+        self.alert_status[alert_id] = "Đã xử lý" if success else "Chưa xử lý"
+        self._refresh_views(select_alert_id=alert_id)
+        if not success:
+            QMessageBox.warning(self, "IPS không áp dụng được rule", message)

@@ -67,6 +67,59 @@ def _arp_candidates() -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def _vmrun_executable() -> str:
+    configured = os.getenv("VMRUN_CLI", "").strip()
+    if configured:
+        return str(Path(configured).expanduser())
+    located = shutil.which("vmrun")
+    if located:
+        return located
+    for candidate in (
+        Path(r"D:\VMware\vmrun.exe"),
+        Path(os.getenv("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+        / "VMware" / "VMware Workstation" / "vmrun.exe",
+    ):
+        if candidate.is_file():
+            return str(candidate)
+    return "vmrun"
+
+
+def _vmware_tools_candidates() -> list[str]:
+    """Read current guest IPs from running VMware VMs, including bridged DHCP."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        running = subprocess.run(
+            [_vmrun_executable(), "list"], capture_output=True, text=True, timeout=5,
+            creationflags=flags,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if running.returncode != 0:
+        return []
+    candidates: list[str] = []
+    for line in running.stdout.splitlines()[1:]:
+        vmx = line.strip()
+        if not vmx.lower().endswith(".vmx"):
+            continue
+        try:
+            result = subprocess.run(
+                [_vmrun_executable(), "getGuestIPAddress", vmx, "-wait"],
+                capture_output=True, text=True, timeout=7, creationflags=flags,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        value = result.stdout.strip()
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError:
+            continue
+        if result.returncode == 0 and isinstance(address, ipaddress.IPv4Address):
+            text = str(address)
+            if text not in candidates:
+                candidates.append(text)
+    return candidates
+
+
 def _saved_vm_candidate() -> str | None:
     path = traffic_generator_config_path()
     try:
@@ -151,7 +204,11 @@ def _agent_health(base_url: str, timeout: float = 1.0) -> bool:
     except (OSError, URLError, ValueError, TypeError):
         return False
     hosts = payload.get("hosts") if isinstance(payload, dict) else None
-    return payload.get("status") == "ok" and isinstance(hosts, dict) and all(hosts.values())
+    return (
+        payload.get("status") in {"ok", "mininet_unavailable"}
+        and isinstance(hosts, dict)
+        and {"h1", "h2", "h3"}.issubset(hosts)
+    )
 
 
 def _ssh_users() -> list[str]:
@@ -197,7 +254,11 @@ def _verify_mininet_vm(
         except (ValueError, TypeError):
             continue
         hosts = health.get("hosts")
-        if health.get("status") == "ok" and isinstance(hosts, dict) and all(hosts.values()):
+        if (
+            health.get("status") in {"ok", "mininet_unavailable"}
+            and isinstance(hosts, dict)
+            and {"h1", "h2", "h3"}.issubset(hosts)
+        ):
             return user
     return None
 
@@ -235,6 +296,7 @@ def discover_network(hostname: str = "duy-server") -> NetworkDiscoveryResult:
     sources = (
         [(configured_ip, "environment")] if configured_ip else []
     ) + [(value, "tailscale") for value in tailscale_peers]
+    sources.extend((value, "vmware_tools") for value in _vmware_tools_candidates())
     saved = _saved_vm_candidate()
     if saved:
         sources.append((saved, "saved"))

@@ -129,6 +129,13 @@ class IpsClient:
         self.connect()
         return self._request("GET", "/api/ips/health")
 
+    def topology(self) -> dict:
+        self.connect()
+        result = self._request("GET", "/api/topology")
+        if not isinstance(result.get("nodes"), list) or not isinstance(result.get("links"), list):
+            raise IpsClientError("Mininet agent trả topology không hợp lệ")
+        return result
+
     def snapshot(self) -> dict:
         self.connect()
         health = self._request("GET", "/api/ips/health")

@@ -11,12 +11,22 @@ from app.services.network_discovery import (
     NetworkDiscoveryResult,
     _lease_candidates,
     _tailscale_addresses,
+    _vmware_tools_candidates,
     discover_network,
     sync_traffic_generator_config,
 )
 
 
 class NetworkDiscoveryTest(unittest.TestCase):
+    def test_vmware_tools_finds_bridged_guest_address(self) -> None:
+        running = Mock(returncode=0, stdout="Total running VMs: 1\nD:\\VMs\\duy-server.vmx\n")
+        address = Mock(returncode=0, stdout="192.168.1.15\n")
+        with (
+            patch("app.services.network_discovery._vmrun_executable", return_value="vmrun"),
+            patch("app.services.network_discovery.subprocess.run", side_effect=[running, address]),
+        ):
+            self.assertEqual(_vmware_tools_candidates(), ["192.168.1.15"])
+
     def test_latest_vmware_lease_is_first_candidate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             vmware = Path(directory) / "VMware"
@@ -71,6 +81,7 @@ class NetworkDiscoveryTest(unittest.TestCase):
             ),
             patch("app.services.network_discovery._agent_health", return_value=False),
             patch("app.services.network_discovery._saved_vm_candidate", return_value=None),
+            patch("app.services.network_discovery._vmware_tools_candidates", return_value=[]),
             patch("app.services.network_discovery._lease_candidates", return_value=[]),
             patch("app.services.network_discovery._arp_candidates", return_value=[]),
             patch("app.services.network_discovery._verify_mininet_vm", return_value="trafficuser"),

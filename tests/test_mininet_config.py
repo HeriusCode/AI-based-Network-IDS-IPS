@@ -26,6 +26,24 @@ class MininetConfigTest(unittest.TestCase):
             self.assertEqual(saved, loaded)
             self.assertEqual(loaded.agent_url, "http://192.168.1.15:9000")
 
+    def test_tunneled_vm_does_not_reload_as_direct_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {
+                "MININET_CONFIG": str(Path(directory) / "mininet.json"),
+                "MININET_VM_IP": "",
+                "MININET_AGENT_PORT": "",
+                "MININET_VM_USER": "",
+                "MININET_AGENT_URL": "",
+            }
+            with patch.dict(os.environ, environment, clear=False):
+                save_mininet_config(
+                    "100.104.102.46", 9000, "trafficuser", direct=False
+                )
+                loaded = load_mininet_config()
+            self.assertEqual(loaded.host, "100.104.102.46")
+            self.assertEqual(loaded.user, "trafficuser")
+            self.assertEqual(loaded.agent_url, "")
+
 
 if __name__ == "__main__":
     unittest.main()

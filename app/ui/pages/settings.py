@@ -709,7 +709,14 @@ class SettingsPage(QScrollArea):
         self.mininet_agent_port = input_field(str(self.mininet_config.port), "1–65535")
         self.mininet_agent_port.setValidator(QIntValidator(1, 65535, self.mininet_agent_port))
         card1.add_row("Mininet Agent Port", self.mininet_agent_port)
-        self.vm_identity = input_field("Chưa kết nối" if not self.mininet_config.host else f"Direct agent · {self.mininet_config.agent_url}")
+        saved_connection = (
+            f"Direct agent · {self.mininet_config.agent_url}"
+            if self.mininet_config.direct else
+            f"SSH tunnel · {self.mininet_config.user}@{self.mininet_config.host}"
+        )
+        self.vm_identity = input_field(
+            "Chưa kết nối" if not self.mininet_config.host else saved_connection
+        )
         self.vm_identity.setReadOnly(True)
         card1.add_row("Nhận diện VM", self.vm_identity)
 
@@ -1086,7 +1093,7 @@ class SettingsPage(QScrollArea):
             path = sync_traffic_generator_config(result, port)
             self.mininet_config = save_mininet_config(
                 result.vm_ip, result.agent_port, result.vm_user,
-                direct=bool(result.agent_url),
+                direct=result.connection_source == "direct_agent",
             )
             if self.mitigation_service is not None:
                 client = self.mitigation_service.client

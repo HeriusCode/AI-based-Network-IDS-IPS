@@ -110,6 +110,12 @@ theo thứ tự:
 3. IP cấu hình trong biến môi trường hoặc file Traffic Generator cục bộ.
 4. VMware DHCP lease và ARP `192.168.201.x`.
 
+Nếu tunnel `19000` đã mở, ứng dụng đọc đích SSH của tiến trình đang giữ tunnel
+để hiển thị IP và user VM. Khi Tailscale CLI không có trong `PATH`, IP
+Tailscale của máy IDS/IPS được đọc từ card mạng Tailscale. Tunnel không tự
+chứa IP VM; nếu không tìm được đích SSH, ứng dụng yêu cầu nhập
+`MININET_VM_IP` hoặc IP VM trong Cài đặt thay vì hiển thị `127.0.0.1`.
+
 Ứng dụng xác thực hostname, SSH key và health của Mininet agent; nó thử SSH user
 trong `MININET_VM_USER`, rồi `trafficuser` và `root`. Khi dùng Tailscale,
 IP Tailscale của máy IDS/IPS được chọn làm endpoint để Traffic Generator trên

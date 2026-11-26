@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ from app.services.network_discovery import (
     NetworkDiscoveryResult,
     _lease_candidates,
     _tailscale_addresses,
+    _tunnel_ssh_destination,
     _vmware_tools_candidates,
     discover_network,
     sync_traffic_generator_config,
@@ -71,6 +73,20 @@ class NetworkDiscoveryTest(unittest.TestCase):
                 ("100.90.30.20", ["100.104.102.46"]),
             )
 
+    def test_tailscale_adapter_supplies_local_ip_when_cli_is_unavailable(self) -> None:
+        address = Mock(family=socket.AF_INET, address="100.90.30.20")
+        with (
+            patch(
+                "app.services.network_discovery.subprocess.run",
+                side_effect=FileNotFoundError,
+            ),
+            patch(
+                "app.services.network_discovery.psutil.net_if_addrs",
+                return_value={"Tailscale Tunnel": [address]},
+            ),
+        ):
+            self.assertEqual(_tailscale_addresses(), ("100.90.30.20", []))
+
     def test_discovery_prefers_verified_tailscale_peer(self) -> None:
         missing_config = Path(tempfile.gettempdir()) / "missing-traffic-config.json"
         with (
@@ -93,6 +109,66 @@ class NetworkDiscoveryTest(unittest.TestCase):
         self.assertEqual(result.vm_user, "trafficuser")
         self.assertEqual(result.connection_source, "tailscale")
         self.assertEqual(result.traffic_config_path, "")
+
+    def test_local_tunnel_recovers_vm_ip_and_user_from_ssh_process(self) -> None:
+        process = Mock()
+        process.info = {
+            "name": "ssh.exe",
+            "cmdline": [
+                "ssh", "-N", "-L", "127.0.0.1:19000:127.0.0.1:9000",
+                "-i", r"C:\Users\THUY HOAN\.ssh\traffic-generator-vm",
+                "trafficuser@100.104.102.46",
+            ],
+        }
+        with patch(
+            "app.services.network_discovery.psutil.process_iter",
+            return_value=iter([process]),
+        ):
+            self.assertEqual(
+                _tunnel_ssh_destination(19000, 9000),
+                ("100.104.102.46", "trafficuser"),
+            )
+
+        missing_config = Path(tempfile.gettempdir()) / "missing-traffic-config.json"
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "app.services.network_discovery._tailscale_addresses",
+                return_value=("100.90.30.20", []),
+            ),
+            patch("app.services.network_discovery._agent_health", return_value=True),
+            patch(
+                "app.services.network_discovery._tunnel_ssh_destination",
+                return_value=("100.104.102.46", "trafficuser"),
+            ),
+            patch(
+                "app.services.network_discovery.traffic_generator_config_path",
+                return_value=missing_config,
+            ),
+        ):
+            result = discover_network()
+        self.assertEqual(result.vm_ip, "100.104.102.46")
+        self.assertEqual(result.vm_user, "trafficuser")
+        self.assertEqual(result.connection_source, "local_tunnel")
+
+    def test_local_tunnel_never_reports_loopback_as_vm_ip(self) -> None:
+        missing_config = Path(tempfile.gettempdir()) / "missing-traffic-config.json"
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "app.services.network_discovery._tailscale_addresses",
+                return_value=("100.90.30.20", []),
+            ),
+            patch("app.services.network_discovery._agent_health", return_value=True),
+            patch("app.services.network_discovery._tunnel_ssh_destination", return_value=None),
+            patch("app.services.network_discovery._saved_vm_candidate", return_value=None),
+            patch(
+                "app.services.network_discovery.traffic_generator_config_path",
+                return_value=missing_config,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "không xác định được IP VM"):
+                discover_network()
 
     def test_missing_remote_traffic_config_is_optional(self) -> None:
         result = NetworkDiscoveryResult(

@@ -13,6 +13,8 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
+import psutil
+
 from app.core.server_config import primary_local_ipv4
 
 
@@ -160,6 +162,26 @@ def _tailscale_executable() -> str:
     return "tailscale"
 
 
+def _local_tailscale_ip() -> str | None:
+    """Read the Tailscale adapter when its CLI is unavailable on Windows."""
+    network = ipaddress.ip_network("100.64.0.0/10")
+    try:
+        interfaces = psutil.net_if_addrs()
+    except (psutil.Error, OSError):
+        return None
+    for name, addresses in interfaces.items():
+        if "tailscale" not in name.lower():
+            continue
+        for entry in addresses:
+            try:
+                address = ipaddress.IPv4Address(entry.address)
+            except ValueError:
+                continue
+            if address in network:
+                return str(address)
+    return None
+
+
 def _tailscale_addresses(hostname: str = "duy-server") -> tuple[str | None, list[str]]:
     """Return this machine's Tailscale IPv4 and matching online peer addresses."""
     try:
@@ -169,13 +191,13 @@ def _tailscale_addresses(hostname: str = "duy-server") -> tuple[str | None, list
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
-        return None, []
+        return _local_tailscale_ip(), []
     if result.returncode != 0:
-        return None, []
+        return _local_tailscale_ip(), []
     try:
         payload = json.loads(result.stdout)
     except (TypeError, ValueError):
-        return None, []
+        return _local_tailscale_ip(), []
 
     local_addresses = _ipv4_values(payload.get("TailscaleIPs"))
     peers = payload.get("Peer", {})
@@ -194,7 +216,7 @@ def _tailscale_addresses(hostname: str = "duy-server") -> tuple[str | None, list
         for address in _ipv4_values(peer.get("TailscaleIPs")):
             if address not in matches:
                 matches.append(address)
-    return (local_addresses[0] if local_addresses else None), matches
+    return (local_addresses[0] if local_addresses else _local_tailscale_ip()), matches
 
 
 def _agent_health(base_url: str, timeout: float = 1.0) -> bool:
@@ -214,6 +236,42 @@ def _agent_health(base_url: str, timeout: float = 1.0) -> bool:
 def _ssh_users() -> list[str]:
     configured = os.getenv("MININET_VM_USER", "").strip()
     return list(dict.fromkeys(value for value in (configured, "trafficuser", "root") if value))
+
+
+def _tunnel_ssh_destination(local_port: int, agent_port: int) -> tuple[str, str] | None:
+    """Find the VM address and SSH user for an active local agent tunnel."""
+    try:
+        processes = psutil.process_iter(["name", "cmdline"])
+        for process in processes:
+            try:
+                name = str(process.info["name"] or "").lower()
+                args = [str(arg) for arg in process.info["cmdline"] or []]
+            except (psutil.AccessDenied, psutil.NoSuchProcess):
+                continue
+            if name not in {"ssh", "ssh.exe"}:
+                continue
+            forwardings = [
+                args[index + 1] if arg == "-L" and index + 1 < len(args) else arg[2:]
+                for index, arg in enumerate(args)
+                if arg == "-L" or arg.startswith("-L")
+            ]
+            target = f"127.0.0.1:{local_port}:127.0.0.1:{agent_port}"
+            if target not in forwardings:
+                continue
+            for arg in reversed(args):
+                if "@" not in arg:
+                    continue
+                user, host = arg.rsplit("@", 1)
+                if not re.fullmatch(r"[a-z_][a-z0-9_-]*", user):
+                    continue
+                try:
+                    address = ipaddress.IPv4Address(host)
+                except ValueError:
+                    continue
+                return str(address), user
+    except (psutil.Error, OSError):
+        return None
+    return None
 
 
 def _verify_mininet_vm(
@@ -277,15 +335,32 @@ def discover_network(hostname: str = "duy-server") -> NetworkDiscoveryResult:
         local_urls.append("http://127.0.0.1:19000")
     for url in local_urls:
         if url and _agent_health(url):
+            tunnel_destination = (
+                _tunnel_ssh_destination(19000, agent_port)
+                if url == "http://127.0.0.1:19000" else None
+            )
             vm_ip = os.getenv("MININET_VM_IP", "").strip()
             if not vm_ip:
-                vm_ip = tailscale_peers[0] if tailscale_peers else _saved_vm_candidate() or "127.0.0.1"
+                vm_ip = (
+                    (tunnel_destination[0] if tunnel_destination else "")
+                    or (tailscale_peers[0] if tailscale_peers else "")
+                    or _saved_vm_candidate()
+                    or ""
+                )
+            if not vm_ip:
+                raise RuntimeError(
+                    "Tunnel Mininet đang hoạt động nhưng không xác định được IP VM. "
+                    "Hãy đặt MININET_VM_IP hoặc nhập IP Tailscale VM trong Cài đặt."
+                )
             return NetworkDiscoveryResult(
                 server_ip=server_ip,
                 vm_ip=vm_ip,
                 vm_hostname=hostname,
                 traffic_config_path=shared_config,
-                vm_user=os.getenv("MININET_VM_USER", "trafficuser"),
+                vm_user=os.getenv(
+                    "MININET_VM_USER",
+                    tunnel_destination[1] if tunnel_destination else "trafficuser",
+                ),
                 agent_port=agent_port,
                 connection_source="local_tunnel",
                 agent_url=url,

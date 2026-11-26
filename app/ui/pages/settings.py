@@ -683,7 +683,7 @@ class SettingsPage(QScrollArea):
         self.server_ip.textChanged.connect(self._sync_server_url)
         self.server_port.textChanged.connect(self._sync_server_url)
 
-        server_hint = QLabel("● Endpoint này được hiển thị trên Dashboard và lưu trong server_config.json")
+        server_hint = QLabel("● Endpoint này được tự phát hiện và lưu riêng cho từng máy/người dùng")
         server_hint.setStyleSheet("color: #60A5FA; font-size: 11.5px; font-weight: 600;")
         server_card.box.addWidget(server_hint)
 

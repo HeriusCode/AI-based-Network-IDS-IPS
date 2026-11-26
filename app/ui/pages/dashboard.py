@@ -1075,9 +1075,12 @@ class DashboardPage(QScrollArea):
         self.web_server.test_connection(config.server_ip, config.server_port)
 
     def _server_config_changed(self, server_ip: str, server_port: int) -> None:
-        if self.web_server.is_running:
+        was_running = self.web_server.is_running
+        if was_running:
             self.web_server.stop()
         self.server_endpoint.set_endpoint(server_ip, server_port)
+        if was_running:
+            self.web_server.start(server_ip, server_port)
 
     def _server_state_changed(self, running: bool, message: str) -> None:
         self.server_endpoint.set_running(running, message)
@@ -1093,7 +1096,10 @@ class DashboardPage(QScrollArea):
         self.system_card.set_available(snapshot.available)
         if not snapshot.available:
             self.speed_badge.setText("— Mbps")
+            self.speed_badge.setToolTip(snapshot.error or "Không đọc được bộ đếm mạng của hệ điều hành")
             return
+
+        self.speed_badge.setToolTip("Dữ liệu trực tiếp từ bộ đếm mạng của hệ điều hành")
 
         total_mbps = snapshot.incoming_mbps + snapshot.outgoing_mbps
         self.speed_badge.setText(f"{total_mbps:.2f} Mbps")

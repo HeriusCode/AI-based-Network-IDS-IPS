@@ -137,6 +137,8 @@ class MainWindow(QMainWindow):
 
         self._resize_handles = self._create_resize_handles()
         self.navigate("dashboard")
+        endpoint = self.server_config_manager.config
+        self.web_server.start(endpoint.server_ip, endpoint.server_port)
 
     def _create_resize_handles(self) -> dict[str, ResizeHandle]:
         return {

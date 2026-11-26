@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import socket
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
+
+from app.core.runtime_paths import runtime_config_path
 
 
 def local_ipv4_addresses() -> list[str]:
@@ -60,10 +63,17 @@ class ServerConfigManager(QObject):
 
     changed = Signal(str, int)
 
-    def __init__(self, path: Path | None = None, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | None = None,
+        parent: QObject | None = None,
+        *,
+        require_local_address: bool | None = None,
+    ) -> None:
         super().__init__(parent)
-        project_root = Path(__file__).resolve().parents[2]
-        self.path = path or project_root / "server_config.json"
+        configured = os.getenv("IDS_SERVER_CONFIG", "").strip()
+        self.path = path or (Path(configured).expanduser() if configured else runtime_config_path("server_config.json"))
+        self.require_local_address = (path is None) if require_local_address is None else require_local_address
         self.config = self._load()
 
     def _load(self) -> ServerConfig:
@@ -76,6 +86,10 @@ class ServerConfigManager(QObject):
             server_port = int(payload.get("server_port", fallback.server_port))
             if not 1 <= server_port <= 65535:
                 raise ValueError("Port ngoài phạm vi")
+            if self.require_local_address and server_ip not in {*local_ipv4_addresses(), "127.0.0.1"}:
+                # A repository copied from another computer or a DHCP change
+                # must never make this process bind to a foreign address.
+                return fallback
             return ServerConfig(server_ip, server_port)
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return fallback
@@ -87,6 +101,7 @@ class ServerConfigManager(QObject):
             raise ValueError("Port phải nằm trong khoảng 1–65535.")
 
         config = ServerConfig(normalized_ip, normalized_port)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
             json.dumps(asdict(config), ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",

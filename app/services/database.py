@@ -8,7 +8,9 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-CONFIG_FILE = Path(__file__).resolve().parents[2] / "db_config.json"
+from app.core.runtime_paths import runtime_config_path
+
+CONFIG_FILE = Path(os.getenv("IDS_DB_CONFIG", "")).expanduser() if os.getenv("IDS_DB_CONFIG", "").strip() else runtime_config_path("db_config.json")
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "host": "localhost",
@@ -56,6 +58,7 @@ def get_db_config() -> dict[str, Any]:
 def save_db_config(new_config: dict[str, Any]) -> bool:
     """Save database connection settings to db_config.json."""
     try:
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(CONFIG_FILE, "w", encoding="utf-8") as file:
             json.dump(new_config, file, indent=2, ensure_ascii=False)
         return True

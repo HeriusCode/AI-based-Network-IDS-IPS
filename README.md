@@ -27,6 +27,22 @@ python main.py
 
 Trên macOS/Linux, thay lệnh kích hoạt bằng `source .venv/bin/activate`.
 
+### Cấu hình riêng cho từng máy
+
+Ứng dụng không đọc IP và mật khẩu runtime từ repository. Mỗi máy lưu cấu hình
+trong thư mục người dùng (`%LOCALAPPDATA%\AI-based Network IDS-IPS` trên
+Windows hoặc `~/.config/ai-network-ids-ips` trên Linux). Có thể đổi thư mục bằng
+`IDS_IPS_CONFIG_DIR`.
+
+Trước lần đăng nhập đầu tiên, sao chép `db_config.example.json` thành
+`db_config.json` trong thư mục trên và điền PostgreSQL/Supabase của môi trường.
+Ngoài ra có thể dùng `IDS_DB_CONFIG` để trỏ tới file khác hoặc đặt các biến
+`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`.
+
+Endpoint nhận flow tự chọn IPv4 đang hoạt động của máy và tự khởi động sau khi
+đăng nhập. Nếu DHCP làm IP thay đổi, cấu hình cũ sẽ bị bỏ qua ở lần chạy kế tiếp.
+Có thể đặt `IDS_SERVER_CONFIG` nếu muốn dùng một file cấu hình cụ thể.
+
 ## Cấu trúc
 
 - `main.py`: khởi chạy Qt và áp dụng theme.
@@ -37,7 +53,7 @@ Trên macOS/Linux, thay lệnh kích hoạt bằng `source .venv/bin/activate`.
 
 ## Flow live từ Mininet
 
-Chạy AI API (`D:\AI-Network-IDS`, mặc định `http://127.0.0.1:8000`) và mở IDS/IPS
+Chạy AI API (mặc định `http://127.0.0.1:8000`) và mở IDS/IPS
 server trên cổng quản lý đã cấu hình (ví dụ `192.168.1.21:8000`). Traffic
 Generator gửi đặc trưng packet đã bắt từ Mininet tới `POST /api/flows` trên
 server này. Server gọi `/detect` của AI API, giữ tối đa 500 flow gần nhất trong

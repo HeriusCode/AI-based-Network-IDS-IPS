@@ -886,11 +886,13 @@ class MonitoringPage(QScrollArea):
         self._last_snapshot = snapshot
         if not snapshot.available:
             self.live_badge.setText("●  KHÔNG CÓ DỮ LIỆU")
+            self.live_badge.setToolTip(snapshot.error or "Không đọc được bộ đếm mạng của hệ điều hành")
             for card in self.metric_cards:
                 card.set_data("—", "Offline", 0.0)
             return
 
         self.live_badge.setText("●  LIVE MONITORING")
+        self.live_badge.setToolTip("Dữ liệu trực tiếp từ bộ đếm mạng của hệ điều hành")
         total_mbps = snapshot.incoming_mbps + snapshot.outgoing_mbps
         total_pps = snapshot.incoming_pps + snapshot.outgoing_pps
         values = (

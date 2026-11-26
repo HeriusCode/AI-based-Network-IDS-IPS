@@ -1099,7 +1099,7 @@ class DashboardPage(QScrollArea):
             self.speed_badge.setToolTip(snapshot.error or "Không đọc được bộ đếm mạng của hệ điều hành")
             return
 
-        self.speed_badge.setToolTip("Dữ liệu trực tiếp từ bộ đếm mạng của hệ điều hành")
+        self.speed_badge.setToolTip(snapshot.error or "Dữ liệu trực tiếp từ bộ đếm mạng của hệ điều hành")
 
         total_mbps = snapshot.incoming_mbps + snapshot.outgoing_mbps
         self.speed_badge.setText(f"{total_mbps:.2f} Mbps")

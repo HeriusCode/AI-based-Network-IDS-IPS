@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.server_config import ServerConfigManager, local_ipv4_addresses, primary_local_ipv4
+from app.core.mininet_config import load_mininet_config, save_mininet_config
 from app.services.mitigation_service import MitigationService
 from app.services.network_discovery import (
     NetworkDiscoveryResult,
@@ -319,6 +320,7 @@ class SettingsPage(QScrollArea):
         self.server_config = server_config or ServerConfigManager(parent=self)
         self.mitigation_service = mitigation_service
         self.web_server = web_server
+        self.mininet_config = load_mininet_config()
         self.network_worker: NetworkDiscoveryWorker | None = None
         self.setObjectName("settingsScroll")
         self.setWidgetResizable(True)
@@ -443,6 +445,9 @@ class SettingsPage(QScrollArea):
         root.addLayout(footer)
         self.setWidget(content)
         self.server_config.changed.connect(self._load_server_endpoint)
+        if self.mitigation_service is not None:
+            self.mitigation_service.topology_changed.connect(self._mininet_connection_ok)
+            self.mitigation_service.topology_error.connect(self._mininet_connection_error)
         self.network_timer = QTimer(self)
         self.network_timer.setInterval(30_000)
         self.network_timer.timeout.connect(self._auto_discover_network)
@@ -699,12 +704,21 @@ class SettingsPage(QScrollArea):
         self.detected_server_ip = input_field(endpoint.server_ip)
         self.detected_server_ip.setReadOnly(True)
         card1.add_row("IP máy IDS/IPS", self.detected_server_ip)
-        self.detected_vm_ip = input_field("Đang phát hiện...")
-        self.detected_vm_ip.setReadOnly(True)
+        self.detected_vm_ip = input_field(self.mininet_config.host, "Ví dụ: 192.168.1.15")
         card1.add_row("IP Mininet VM", self.detected_vm_ip)
-        self.vm_identity = input_field("duy-server · SSH key · agent 9000")
+        self.mininet_agent_port = input_field(str(self.mininet_config.port), "1–65535")
+        self.mininet_agent_port.setValidator(QIntValidator(1, 65535, self.mininet_agent_port))
+        card1.add_row("Mininet Agent Port", self.mininet_agent_port)
+        self.vm_identity = input_field("Chưa kết nối" if not self.mininet_config.host else f"Direct agent · {self.mininet_config.agent_url}")
         self.vm_identity.setReadOnly(True)
         card1.add_row("Nhận diện VM", self.vm_identity)
+
+        manual_connect = QPushButton("  Lưu & kết nối VM")
+        manual_connect.setObjectName("connectionTestButton")
+        manual_connect.setIcon(icon("nodes", "#34D399", 14))
+        manual_connect.setCursor(Qt.CursorShape.PointingHandCursor)
+        manual_connect.clicked.connect(self._connect_manual_vm)
+        card1.box.addWidget(manual_connect, 0, Qt.AlignmentFlag.AlignRight)
 
         self.network_detect_button = QPushButton("  Phát hiện & đồng bộ ngay")
         self.network_detect_button.setObjectName("connectionTestButton")
@@ -1070,6 +1084,10 @@ class SettingsPage(QScrollArea):
             if server_changed:
                 self.server_config.save(result.server_ip, port)
             path = sync_traffic_generator_config(result, port)
+            self.mininet_config = save_mininet_config(
+                result.vm_ip, result.agent_port, result.vm_user,
+                direct=bool(result.agent_url),
+            )
             if self.mitigation_service is not None:
                 client = self.mitigation_service.client
                 connection_changed = (
@@ -1097,10 +1115,12 @@ class SettingsPage(QScrollArea):
         self.server_ip.setText(result.server_ip)
         self.detected_server_ip.setText(result.server_ip)
         self.detected_vm_ip.setText(result.vm_ip)
+        self.mininet_agent_port.setText(str(result.agent_port))
         source_names = {
             "local_tunnel": "tunnel local",
             "tailscale": "Tailscale",
             "environment": "biến môi trường",
+            "direct_agent": "agent trực tiếp",
             "saved": "cấu hình đã lưu",
             "vmware_dhcp": "VMware DHCP",
             "vmware_arp": "VMware ARP",
@@ -1122,6 +1142,44 @@ class SettingsPage(QScrollArea):
         self.network_status_lbl.setToolTip(message)
         self.network_status_lbl.setStyleSheet("color: #FF5B79; font-size: 12.5px; font-weight: 600;")
         self.show_status(f"✕ {message}", False)
+
+    def _connect_manual_vm(self) -> None:
+        """Connect another workstation to the shared lab VM without an SSH key."""
+        try:
+            config = save_mininet_config(
+                self.detected_vm_ip.text(),
+                int(self.mininet_agent_port.text()),
+                "root",
+                direct=True,
+            )
+            if self.mitigation_service is None:
+                raise RuntimeError("Dịch vụ Mininet chưa được khởi tạo")
+            self.mitigation_service.client.configure(
+                host=config.host,
+                user=config.user,
+                agent_port=config.port,
+                direct_url=config.agent_url,
+            )
+            self.mininet_config = config
+            self.vm_identity.setText(f"Direct agent · {config.agent_url}")
+            self.network_status_lbl.setText("⏳ Đang kiểm tra Mininet agent...")
+            self.network_status_lbl.setStyleSheet("color: #FBBF24; font-size: 12.5px; font-weight: 600;")
+            self.mitigation_service.refresh_topology_async()
+            self.mitigation_service.refresh_async()
+            self.show_status(f"✓ Đã lưu kết nối VM {config.host}:{config.port}", True)
+        except (OSError, RuntimeError, ValueError) as error:
+            self._network_discovery_failed(str(error))
+
+    def _mininet_connection_ok(self, payload: object) -> None:
+        nodes = len(payload.get("nodes", [])) if isinstance(payload, dict) else 0
+        self.network_status_lbl.setText(f"● Mininet agent đã kết nối · {nodes} node")
+        self.network_status_lbl.setStyleSheet("color: #34D399; font-size: 12.5px; font-weight: 600;")
+        self.network_status_lbl.setToolTip("")
+
+    def _mininet_connection_error(self, message: str) -> None:
+        self.network_status_lbl.setText("● Không kết nối được Mininet agent")
+        self.network_status_lbl.setStyleSheet("color: #FF5B79; font-size: 12.5px; font-weight: 600;")
+        self.network_status_lbl.setToolTip(message)
 
     def _network_worker_finished(self) -> None:
         self.network_detect_button.setEnabled(True)

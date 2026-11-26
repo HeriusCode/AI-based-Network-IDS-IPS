@@ -104,6 +104,27 @@ class NetworkDiscoveryTest(unittest.TestCase):
         )
         self.assertIsNone(sync_traffic_generator_config(result))
 
+    def test_direct_agent_needs_no_ssh_private_key(self) -> None:
+        missing_config = Path(tempfile.gettempdir()) / "missing-traffic-config.json"
+        with (
+            patch.dict(os.environ, {"MININET_VM_IP": "192.168.1.15"}, clear=True),
+            patch("app.services.network_discovery._tailscale_addresses", return_value=(None, [])),
+            patch(
+                "app.services.network_discovery._agent_health",
+                side_effect=lambda url, timeout=1.0: url == "http://192.168.1.15:9000",
+            ),
+            patch("app.services.network_discovery._saved_vm_candidate", return_value=None),
+            patch("app.services.network_discovery._vmware_tools_candidates", return_value=[]),
+            patch("app.services.network_discovery._lease_candidates", return_value=[]),
+            patch("app.services.network_discovery._arp_candidates", return_value=[]),
+            patch("app.services.network_discovery._verify_mininet_vm") as verify_ssh,
+            patch("app.services.network_discovery.traffic_generator_config_path", return_value=missing_config),
+        ):
+            result = discover_network()
+        self.assertEqual(result.connection_source, "direct_agent")
+        self.assertEqual(result.agent_url, "http://192.168.1.15:9000")
+        verify_ssh.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

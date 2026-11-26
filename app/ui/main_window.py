@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QMessageBox, QS
 from app.core.config import WINDOW_TITLE
 from app.core.navigation import NAV_ITEMS
 from app.core.server_config import ServerConfigManager
+from app.core.mininet_config import load_mininet_config
 from app.services.web_server import WebServerController
 from app.services.mitigation_service import MitigationService
 from app.ui.dialogs import LogoutConfirmDialog
@@ -53,6 +54,14 @@ class MainWindow(QMainWindow):
         self.server_config_manager = ServerConfigManager(parent=self)
         self.web_server = WebServerController(parent=self)
         self.mitigation_service = MitigationService(parent=self)
+        mininet = load_mininet_config()
+        if mininet.host:
+            self.mitigation_service.client.configure(
+                host=mininet.host,
+                user=mininet.user,
+                agent_port=mininet.port,
+                direct_url=mininet.agent_url,
+            )
         self.web_server.live_service.changed.connect(self.mitigation_service.evaluate_async)
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setWindowTitle(WINDOW_TITLE)

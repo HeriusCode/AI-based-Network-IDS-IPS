@@ -891,8 +891,8 @@ class MonitoringPage(QScrollArea):
                 card.set_data("—", "Offline", 0.0)
             return
 
-        self.live_badge.setText("●  LIVE MONITORING")
-        self.live_badge.setToolTip("Dữ liệu trực tiếp từ bộ đếm mạng của hệ điều hành")
+        self.live_badge.setText("●  LIVE GIỚI HẠN" if snapshot.error else "●  LIVE MONITORING")
+        self.live_badge.setToolTip(snapshot.error or "Dữ liệu trực tiếp từ bộ đếm mạng của hệ điều hành")
         total_mbps = snapshot.incoming_mbps + snapshot.outgoing_mbps
         total_pps = snapshot.incoming_pps + snapshot.outgoing_pps
         values = (

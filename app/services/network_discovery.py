@@ -226,7 +226,7 @@ def _verify_mininet_vm(
         os.getenv("MININET_SSH_KEY", str(Path.home() / ".ssh" / "traffic-generator-vm"))
     ).expanduser()
     if not key_path.is_file():
-        raise RuntimeError(f"Không tìm thấy SSH key: {key_path}")
+        return None
     for user in _ssh_users():
         command = [
             "ssh", "-i", str(key_path), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
@@ -307,6 +307,18 @@ def discover_network(hostname: str = "duy-server") -> NetworkDiscoveryResult:
             candidates.append((value, source))
 
     for candidate, source in candidates:
+        direct_url = f"http://{candidate}:{agent_port}"
+        if _agent_health(direct_url, timeout=1.5):
+            return NetworkDiscoveryResult(
+                server_ip=server_ip,
+                vm_ip=candidate,
+                vm_hostname=hostname,
+                traffic_config_path=shared_config,
+                vm_user=os.getenv("MININET_VM_USER", "root"),
+                agent_port=agent_port,
+                connection_source="direct_agent",
+                agent_url=direct_url,
+            )
         user = _verify_mininet_vm(candidate, hostname, agent_port)
         if user:
             return NetworkDiscoveryResult(

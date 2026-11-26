@@ -4,4 +4,5 @@ __pycache__/
 .pytest_cache/
 db_config.json
 server_config.json
+mininet_connection.json
 .env

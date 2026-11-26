@@ -43,6 +43,18 @@ Endpoint nhận flow tự chọn IPv4 đang hoạt động của máy và tự k
 đăng nhập. Nếu DHCP làm IP thay đổi, cấu hình cũ sẽ bị bỏ qua ở lần chạy kế tiếp.
 Có thể đặt `IDS_SERVER_CONFIG` nếu muốn dùng một file cấu hình cụ thể.
 
+Để máy khác nhìn thấy OS-Ken, `s1` và `h1–h3`, mở **Cài đặt → Kết nối hệ
+thống**, nhập IP hiện tại của Mininet VM và agent port `9000`, sau đó bấm
+**Lưu & kết nối VM**. Kết nối được lưu riêng cho máy đó trong
+`mininet_connection.json`; không cần sao chép SSH private key khi agent được
+truy cập trực tiếp qua mạng lab/Tailscale. Chỉ nên mở port agent trong mạng lab
+tin cậy, không public port `9000` ra Internet.
+
+Dashboard và card Wi‑Fi/Ethernet dùng `psutil`. Luôn chạy lại
+`pip install -r requirements.txt` sau khi pull. Nếu thư viện chưa sẵn sàng, ứng
+dụng vẫn hiển thị host/card mạng ở chế độ giới hạn và ghi nguyên nhân trong
+tooltip trạng thái.
+
 ## Cấu trúc
 
 - `main.py`: khởi chạy Qt và áp dụng theme.

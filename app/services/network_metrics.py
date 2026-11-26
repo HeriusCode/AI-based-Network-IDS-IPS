@@ -69,7 +69,7 @@ class NetworkMetricsCollector:
 
     def sample(self) -> NetworkSnapshot:
         if psutil is None:
-            return NetworkSnapshot(False, error="Thiếu thư viện psutil")
+            return self._limited_snapshot("Thiếu thư viện psutil; đang dùng chế độ mạng giới hạn")
 
         try:
             now = time.monotonic()
@@ -108,7 +108,37 @@ class NetworkMetricsCollector:
                 interfaces=interfaces,
             )
         except Exception as error:
-            return NetworkSnapshot(False, error=str(error))
+            return self._limited_snapshot(f"Không đọc được psutil: {error}")
+
+    @staticmethod
+    def _limited_snapshot(reason: str) -> NetworkSnapshot:
+        """Keep local host/interfaces visible when optional OS counters fail."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                probe.connect(("192.0.2.1", 9))
+                primary_ip = probe.getsockname()[0]
+        except OSError:
+            try:
+                primary_ip = socket.gethostbyname(socket.gethostname())
+            except OSError:
+                primary_ip = "127.0.0.1"
+        try:
+            names = [name for _index, name in socket.if_nameindex()]
+        except (OSError, AttributeError):
+            names = []
+        if not names:
+            names = ["Giao diện mạng cục bộ"]
+        interfaces = tuple(
+            NetworkInterface(
+                name=name,
+                incoming_mbps=0.0,
+                outgoing_mbps=0.0,
+                is_up=index == 0,
+                ip=primary_ip if index == 0 else "—",
+            )
+            for index, name in enumerate(names)
+        )
+        return NetworkSnapshot(available=True, interfaces=interfaces, error=reason)
 
     def _scan_connections(self) -> None:
         protocol_counts: Counter[str] = Counter()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import time
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
@@ -10,6 +11,7 @@ from app.ui.pages import alerts
 
 class FakeLiveService(QObject):
     changed = Signal(object)
+    heartbeat = Signal(object)
 
     def __init__(self, flows: list[dict]) -> None:
         super().__init__()
@@ -63,6 +65,13 @@ class AlertsPageTest(unittest.TestCase):
         live.changed.emit(attack("F2", "Port Scan", 0.8))
         self.app.processEvents()
         self.assertEqual(len(alerts.ALERTS), 2)
+
+        first_alert_id = page._alert_id(attack("F1"))
+        page._alert_last_seen[first_alert_id] = time.monotonic() - 9
+        live.heartbeat.emit({"idle": True})
+        self.app.processEvents()
+        self.assertEqual(page.alert_status[first_alert_id], "Đã kết thúc")
+
         page.combo_attack.setCurrentText("Port Scan")
         page.apply_filters()
         self.assertFalse(page.table.isRowHidden(0))

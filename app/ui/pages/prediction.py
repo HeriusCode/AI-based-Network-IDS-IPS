@@ -700,8 +700,9 @@ class PredictionPage(QScrollArea):
         self.thread_pool = QThreadPool.globalInstance()
         self._forecast_running = False
         self.forecast_horizon = 3
-        self.refresh_interval_ms = 2_000
+        self.refresh_interval_ms = 1_000
         self._last_history_timestamp = ""
+        self._latest_idle = False
         self._alert_rows: list[list[str]] = []
 
         content = QWidget()
@@ -1023,7 +1024,7 @@ class PredictionPage(QScrollArea):
         combo_specs = [
             ("Mô hình AI:", "model_combo", [("Random Forest (Mininet lab)", "random_forest")]),
             ("Khoảng dự đoán:", "horizon_combo", [("3 giây tới", 3), ("5 giây tới", 5), ("10 giây tới", 10)]),
-            ("Chu kỳ cập nhật:", "interval_combo", [("Tự động 2 giây", 2_000), ("5 giây", 5_000), ("10 giây", 10_000)]),
+            ("Chu kỳ cập nhật:", "interval_combo", [("Realtime 1 giây", 1_000), ("2 giây", 2_000), ("5 giây", 5_000)]),
             ("Độ nhạy:", "sensitivity_combo", [("Theo p95/p99 của train", "train_thresholds")]),
         ]
         for label_text, attribute, values in combo_specs:
@@ -1106,10 +1107,12 @@ class PredictionPage(QScrollArea):
         history = self.live_service.traffic_history() if self.live_service is not None else []
         if history:
             latest = history[-1]
+            self._latest_idle = bool(latest.get("idle"))
             total_mbps = float(latest["bytes_per_second"]) * 8 / 1_000_000
             packets_per_second = float(latest["packets_per_second"])
-            self.metric_cards[0].set_data(f"{total_mbps:.3f} Mbps", "Mininet live", total_mbps)
-            self.metric_cards[2].set_data(f"{packets_per_second:.1f} pps", "Mininet live", packets_per_second)
+            source_label = "Mininet idle" if self._latest_idle else "Mininet live"
+            self.metric_cards[0].set_data(f"{total_mbps:.3f} Mbps", source_label, total_mbps)
+            self.metric_cards[2].set_data(f"{packets_per_second:.1f} pps", source_label, packets_per_second)
             new_points = history
             if self._last_history_timestamp:
                 new_points = [
@@ -1189,7 +1192,10 @@ class PredictionPage(QScrollArea):
         self.metric_cards[4].set_data(str(warning), "Dự báo sớm", warning * 100)
         self.summary_card.update_forecast(payload, mbps[-1], packets[-1], risk)
         model_version = str(payload.get("model_version", "traffic-forecast"))
-        self.ai_badge.setText(f"●  AI ONLINE • {model_version}")
+        self.ai_badge.setText(
+            f"●  AI ONLINE • {model_version} • MININET IDLE"
+            if self._latest_idle else f"●  AI ONLINE • {model_version}"
+        )
         self.start_button.setText("  Chạy dự báo lại")
         self.start_button.setEnabled(True)
         self._update_trend_table(chart_rows, payload)

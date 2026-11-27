@@ -1,6 +1,7 @@
 """End-to-end HTTP ingest with a stub model and a real local server."""
 
 import json
+import time
 import unittest
 from unittest.mock import Mock
 from urllib.request import Request, urlopen
@@ -49,6 +50,17 @@ class LiveDetectionTest(unittest.TestCase):
             history = server.live_service.traffic_history()
             self.assertEqual(len(history), 1)
             self.assertGreater(history[0]["packets_per_second"], 0)
+
+            server.live_service._last_ingest_at = time.monotonic() - 2
+            server.live_service._heartbeat_tick()
+            history = server.live_service.traffic_history()
+            self.assertEqual(len(history), 2)
+            self.assertTrue(history[-1]["idle"])
+            self.assertEqual(history[-1]["packets_per_second"], 0)
+
+            flow_key = next(iter(server.live_service._flow_seen_at))
+            server.live_service._flow_seen_at[flow_key] = time.monotonic() - 10
+            self.assertEqual(server.live_service.active_snapshot(), [])
         finally:
             server.stop()
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import time
 from datetime import datetime
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -145,6 +146,7 @@ class AlertsPage(QScrollArea):
         self.mitigation_service = mitigation_service
         self.alert_status: dict[str, str] = {}
         self._known_alerts: set[str] = set()
+        self._alert_last_seen: dict[str, float] = {}
         self._pending_block_alert = ""
         ALERTS.clear()
         ALERT_DETAILS.clear()
@@ -311,6 +313,8 @@ class AlertsPage(QScrollArea):
         self.show_empty_detail()
         if self.live_service is not None:
             self.live_service.changed.connect(self._ingest_live_flow)
+            if hasattr(self.live_service, "heartbeat"):
+                self.live_service.heartbeat.connect(self._expire_inactive_alerts)
             for flow in reversed(self.live_service.snapshot()):
                 self._ingest_live_flow(flow, refresh=False)
             self._refresh_views()
@@ -358,7 +362,9 @@ class AlertsPage(QScrollArea):
 
         self.combo_status = QComboBox()
         self.combo_status.setObjectName("alertCombo")
-        self.combo_status.addItems(["Tất cả trạng thái", "Chưa xử lý", "Đang xử lý", "Đã xử lý"])
+        self.combo_status.addItems([
+            "Tất cả trạng thái", "Chưa xử lý", "Đang xử lý", "Đã kết thúc", "Đã xử lý",
+        ])
         self.combo_status.currentIndexChanged.connect(self.apply_filters)
         toolbar.addWidget(self.combo_status)
 
@@ -459,6 +465,8 @@ class AlertsPage(QScrollArea):
                 self.table.setCellWidget(r, 7, make_badge_cell("● " + st, "rgba(16, 185, 129, 0.15)", "#10B981", "rgba(16, 185, 129, 0.35)"))
             elif st == "Đang xử lý":
                 self.table.setCellWidget(r, 7, make_badge_cell("● " + st, "rgba(255, 91, 121, 0.15)", "#FF5B79", "rgba(255, 91, 121, 0.35)"))
+            elif st == "Đã kết thúc":
+                self.table.setCellWidget(r, 7, make_badge_cell("● " + st, "rgba(148, 163, 184, 0.15)", "#94A3B8", "rgba(148, 163, 184, 0.35)"))
             else:
                 self.table.setCellWidget(r, 7, make_badge_cell("● " + st, "rgba(245, 158, 11, 0.15)", "#F59E0B", "rgba(245, 158, 11, 0.35)"))
 
@@ -555,10 +563,18 @@ class AlertsPage(QScrollArea):
             return raw or datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
     def _ingest_live_flow(self, flow: object, *, refresh: bool = True) -> None:
-        if not isinstance(flow, dict) or flow.get("label") != "ATTACK":
+        if not isinstance(flow, dict):
+            return
+        if flow.get("label") != "ATTACK":
+            self._expire_inactive_alerts({})
             return
         alert_id = self._alert_id(flow)
+        self._alert_last_seen[alert_id] = time.monotonic()
         if alert_id in self._known_alerts:
+            if self.alert_status.get(alert_id) == "Đã kết thúc":
+                self.alert_status[alert_id] = "Chưa xử lý"
+                if refresh:
+                    self._refresh_views(select_alert_id=alert_id)
             return
         self._known_alerts.add(alert_id)
         severity = self._severity(flow)
@@ -609,6 +625,17 @@ class AlertsPage(QScrollArea):
         if refresh:
             self._refresh_views(select_alert_id=alert_id)
 
+    def _expire_inactive_alerts(self, _heartbeat: object) -> None:
+        """Close live incidents after their flow has been quiet for a short window."""
+        cutoff = time.monotonic() - 8.0
+        changed = False
+        for alert_id, last_seen in tuple(self._alert_last_seen.items()):
+            if last_seen < cutoff and self.alert_status.get(alert_id) == "Chưa xử lý":
+                self.alert_status[alert_id] = "Đã kết thúc"
+                changed = True
+        if changed:
+            self._refresh_views()
+
     def _render_alert_row(self, row_index: int, row: list[str]) -> None:
         self.table.setRowHeight(row_index, 32)
         colors = ("#A78BFA", "#CBD5E1", "#FFFFFF", "#C4B5FD", "#E2E8F0")
@@ -630,6 +657,7 @@ class AlertsPage(QScrollArea):
         status_colors = {
             "Đã xử lý": ("rgba(16, 185, 129, 0.15)", "#10B981", "rgba(16, 185, 129, 0.35)"),
             "Đang xử lý": ("rgba(59, 130, 246, 0.15)", "#60A5FA", "rgba(59, 130, 246, 0.35)"),
+            "Đã kết thúc": ("rgba(148, 163, 184, 0.15)", "#94A3B8", "rgba(148, 163, 184, 0.35)"),
             "Chưa xử lý": ("rgba(245, 158, 11, 0.15)", "#F59E0B", "rgba(245, 158, 11, 0.35)"),
         }
         self.table.setCellWidget(row_index, 7, make_badge_cell("● " + row[7], *status_colors[row[7]]))
@@ -674,8 +702,9 @@ class AlertsPage(QScrollArea):
         self.category_donut.set_data(segments, str(total), "cảnh báo")
         for name, label in self.category_labels.items():
             label.setText(f"{counts.get(name, 0) * 100 / total:.1f}%" if total else "0.0%")
+        active_alerts = sum(row[7] in {"Chưa xử lý", "Đang xử lý"} for row in ALERTS)
         self.status_badge.setText(
-            f"●  IDS/IPS LIVE • {total} CẢNH BÁO"
+            f"●  IDS/IPS LIVE • {active_alerts} ĐANG HOẠT ĐỘNG • {total} LỊCH SỬ"
             if self.live_service is not None and total
             else "●  ĐANG CHỜ ATTACK LIVE"
             if self.live_service is not None
@@ -891,6 +920,8 @@ class AlertsPage(QScrollArea):
             self.detail_values["status"].setStyleSheet("color: #10B981; font-weight: 700; font-size: 11px;")
         elif st == "Đang xử lý":
             self.detail_values["status"].setStyleSheet("color: #FF5B79; font-weight: 700; font-size: 11px;")
+        elif st == "Đã kết thúc":
+            self.detail_values["status"].setStyleSheet("color: #94A3B8; font-weight: 700; font-size: 11px;")
         else:
             self.detail_values["status"].setStyleSheet("color: #F59E0B; font-weight: 700; font-size: 11px;")
 
@@ -917,6 +948,11 @@ class AlertsPage(QScrollArea):
             self.block_button.setText("Đang gửi OS-Ken...")
             self.resolve_button.setEnabled(False)
             self.resolve_button.setText("Đang xử lý")
+        elif st == "Đã kết thúc":
+            self.block_button.setEnabled(False)
+            self.block_button.setText("Luồng đã kết thúc")
+            self.resolve_button.setEnabled(True)
+            self.resolve_button.setText("Đánh dấu đã xử lý")
         else:
             self.block_button.setEnabled(True)
             self.block_button.setText("Chặn IP nguồn")

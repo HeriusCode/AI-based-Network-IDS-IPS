@@ -8,13 +8,17 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from app.services.ai_client import AiApiError, AiClient
 
 
 class LiveDetectionService(QObject):
     changed = Signal(object)
+    heartbeat = Signal(object)
+
+    ACTIVE_FLOW_TTL_SECONDS = 5.0
+    HEARTBEAT_INTERVAL_MS = 1_000
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -25,6 +29,13 @@ class LiveDetectionService(QObject):
         self._client = AiClient(timeout=10.0)
         self._traffic_points: deque[dict[str, Any]] = deque(maxlen=600)
         self._flow_counters: dict[str, tuple[int, float, float]] = {}
+        self._flow_seen_at: dict[str, float] = {}
+        self._last_ingest_at = 0.0
+        self._telemetry_started = False
+        self._heartbeat_timer = QTimer(self)
+        self._heartbeat_timer.setInterval(self.HEARTBEAT_INTERVAL_MS)
+        self._heartbeat_timer.timeout.connect(self._heartbeat_tick)
+        self._heartbeat_timer.start()
 
     def ingest(self, flow: dict[str, Any]) -> dict[str, Any]:
         return self.ingest_many([flow])[0]
@@ -62,6 +73,9 @@ class LiveDetectionService(QObject):
         packets_per_second = 0.0
         bytes_per_second = 0.0
         observed_at = time.monotonic()
+        with self._lock:
+            self._last_ingest_at = observed_at
+            self._telemetry_started = True
         for index, (flow, prediction) in enumerate(zip(flows, predictions, strict=True)):
             features = flow["features"]
             classification = classifications.get(index, {})
@@ -111,10 +125,14 @@ class LiveDetectionService(QObject):
                 packets_per_second += delta_packets / elapsed
                 bytes_per_second += delta_bytes / elapsed
                 self._flow_counters[key] = (packet_count, byte_count, observed_at)
+                self._flow_seen_at[key] = observed_at
                 if key in self._items:
                     self._order.remove(key)
                 elif len(self._order) >= self._limit:
-                    self._items.pop(self._order.popleft(), None)
+                    expired_key = self._order.popleft()
+                    self._items.pop(expired_key, None)
+                    self._flow_counters.pop(expired_key, None)
+                    self._flow_seen_at.pop(expired_key, None)
                 self._order.append(key)
                 self._items[key] = result
             self.changed.emit(dict(result))
@@ -128,9 +146,41 @@ class LiveDetectionService(QObject):
             self._traffic_points.append(point)
         return results
 
+    def _heartbeat_tick(self) -> None:
+        """Advance live time while Mininet is idle without fabricating a flow."""
+        now = time.monotonic()
+        with self._lock:
+            if not self._telemetry_started:
+                return
+            if now - self._last_ingest_at < self.HEARTBEAT_INTERVAL_MS / 1000 * 0.75:
+                return
+            point = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "packets_per_second": 0.0,
+                "bytes_per_second": 0.0,
+                "idle": True,
+            }
+            self._traffic_points.append(point)
+            active_flows = sum(
+                seen_at >= now - self.ACTIVE_FLOW_TTL_SECONDS
+                for seen_at in self._flow_seen_at.values()
+            )
+        self.heartbeat.emit({**point, "active_flows": active_flows})
+
     def snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(self._items[key]) for key in reversed(self._order)]
+
+    def active_snapshot(self, max_age_seconds: float | None = None) -> list[dict[str, Any]]:
+        """Return only flows that still belong to the current live window."""
+        max_age = self.ACTIVE_FLOW_TTL_SECONDS if max_age_seconds is None else max(0.1, max_age_seconds)
+        cutoff = time.monotonic() - max_age
+        with self._lock:
+            return [
+                dict(self._items[key])
+                for key in reversed(self._order)
+                if self._flow_seen_at.get(key, 0.0) >= cutoff
+            ]
 
     def traffic_history(self, limit: int = 120) -> list[dict[str, Any]]:
         with self._lock:

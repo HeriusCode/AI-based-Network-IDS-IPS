@@ -54,6 +54,7 @@ class DetectionPage(QScrollArea):
         self.mitigation_service = mitigation_service
         self._selected_detection: list[str] | None = None
         self._live_trend: deque[list[int]] = deque(maxlen=32)
+        self._live_model_version = "unknown"
         self.ai_client = AiClient(timeout=45.0)
         self.thread_pool = QThreadPool.globalInstance()
         self._csv_worker: DetectionCsvWorker | None = None
@@ -235,6 +236,8 @@ class DetectionPage(QScrollArea):
         self.check_ai_health()
         if self.live_service is not None:
             self.live_service.changed.connect(self._live_changed)
+            if hasattr(self.live_service, "heartbeat"):
+                self.live_service.heartbeat.connect(self._live_changed)
             if self.live_service.snapshot():
                 self._live_changed({})
         if self.mitigation_service is not None:
@@ -819,7 +822,8 @@ class DetectionPage(QScrollArea):
     def _live_changed(self, _flow: dict) -> None:
         if self.live_service is None:
             return
-        flows = self.live_service.snapshot()
+        active_snapshot = getattr(self.live_service, "active_snapshot", None)
+        flows = active_snapshot() if callable(active_snapshot) else self.live_service.snapshot()
         DETECTIONS.clear()
         PORT_MAPPINGS.clear()
         ATTACK_DESCRIPTIONS.clear()
@@ -876,11 +880,16 @@ class DetectionPage(QScrollArea):
         self.trend_chart.update()
         self._update_attack_breakdown(type_counts, attack)
         self.detection_badge.setText(f"{attack:,} phát hiện")
-        model = str(flows[0].get("model_version", "unknown")) if flows else "unknown"
+        if flows:
+            self._live_model_version = str(flows[0].get("model_version", "unknown"))
+        model = self._live_model_version
         self.result_count.setText(
-            f"Live Mininet: {total:,} flow · model {model} · đặc trưng xấp xỉ CICFlowMeter"
+            f"Live Mininet: {total:,} flow đang hoạt động · model {model} · cửa sổ 5 giây"
         )
-        self.ai_badge.setText("●  AI ONLINE · FLOW LIVE TỪ MININET")
+        self.ai_badge.setText(
+            "●  AI ONLINE · FLOW LIVE TỪ MININET"
+            if flows else "●  AI ONLINE · KHÔNG CÓ FLOW HIỆN TẠI"
+        )
 
     @staticmethod
     def _attack_family(label: str) -> str:

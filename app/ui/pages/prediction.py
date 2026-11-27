@@ -380,7 +380,8 @@ class AdaptiveForecastChart(QWidget):
         end_time = forecast[-1][0] if forecast else divider_time + timedelta(seconds=3)
         if end_time <= divider_time:
             end_time = divider_time + timedelta(seconds=3)
-        span = max(1.0, (end_time - start_time).total_seconds())
+        history_span = max(1.0, (divider_time - start_time).total_seconds())
+        forecast_span = max(1.0, (end_time - divider_time).total_seconds())
         values = [value for _, value in actual] + [upper for _, _, _, upper in forecast]
         max_y = _nice_axis_max(max(values, default=0.001))
 
@@ -395,19 +396,30 @@ class AdaptiveForecastChart(QWidget):
             painter.setPen(QColor("#8E8BA7"))
             painter.drawText(QRectF(0, y - 8, 48, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, f"{value:.{decimals}f}")
 
-        def x_at(moment: datetime) -> float:
-            return chart.left() + chart.width() * max(0.0, min(1.0, (moment - start_time).total_seconds() / span))
+        divider_x = chart.center().x()
+
+        def history_x_at(moment: datetime) -> float:
+            ratio = max(0.0, min(1.0, (moment - start_time).total_seconds() / history_span))
+            return chart.left() + (divider_x - chart.left()) * ratio
+
+        def forecast_x_at(moment: datetime) -> float:
+            ratio = max(0.0, min(1.0, (moment - divider_time).total_seconds() / forecast_span))
+            return divider_x + (chart.right() - divider_x) * ratio
 
         def y_at(value: float) -> float:
             return chart.bottom() - chart.height() * max(0.0, min(1.0, value / max_y))
 
-        for index in range(6):
-            moment = start_time + timedelta(seconds=span * index / 5)
-            x = chart.left() + chart.width() * index / 5
+        time_labels = [
+            (chart.left(), start_time),
+            ((chart.left() + divider_x) / 2, start_time + timedelta(seconds=history_span / 2)),
+            (divider_x, divider_time),
+            ((divider_x + chart.right()) / 2, divider_time + timedelta(seconds=forecast_span / 2)),
+            (chart.right(), end_time),
+        ]
+        for x, moment in time_labels:
             painter.setPen(QColor("#8E8BA7"))
             painter.drawText(QRectF(x - 30, chart.bottom() + 6, 60, 16), Qt.AlignmentFlag.AlignCenter, moment.strftime("%H:%M:%S"))
 
-        divider_x = x_at(divider_time)
         painter.fillRect(QRectF(divider_x, chart.top(), chart.right() - divider_x, chart.height()), QColor(108, 93, 211, 14))
         painter.setPen(QPen(QColor("#8B5CF6"), 1.2, Qt.PenStyle.DashLine))
         painter.drawLine(QPointF(divider_x, chart.top()), QPointF(divider_x, chart.bottom()))
@@ -420,7 +432,7 @@ class AdaptiveForecastChart(QWidget):
 
         visible_actual = [(moment, value) for moment, value in actual if moment >= start_time]
         if visible_actual:
-            points = [QPointF(x_at(moment), y_at(value)) for moment, value in visible_actual]
+            points = [QPointF(history_x_at(moment), y_at(value)) for moment, value in visible_actual]
             path = QPainterPath(points[0])
             for point in points[1:]:
                 path.lineTo(point)
@@ -428,8 +440,8 @@ class AdaptiveForecastChart(QWidget):
             painter.drawPath(path)
 
         if forecast:
-            upper = [QPointF(x_at(moment), y_at(high)) for moment, _value, _low, high in forecast]
-            lower = [QPointF(x_at(moment), y_at(low)) for moment, _value, low, _high in forecast]
+            upper = [QPointF(forecast_x_at(moment), y_at(high)) for moment, _value, _low, high in forecast]
+            lower = [QPointF(forecast_x_at(moment), y_at(low)) for moment, _value, low, _high in forecast]
             band = QPainterPath(upper[0])
             for point in upper[1:]:
                 band.lineTo(point)
@@ -440,7 +452,7 @@ class AdaptiveForecastChart(QWidget):
             painter.setPen(QPen(QColor(139, 92, 246, 110), 1, Qt.PenStyle.DashLine))
             painter.drawPath(band)
 
-            points = [QPointF(x_at(moment), y_at(value)) for moment, value, _low, _high in forecast]
+            points = [QPointF(forecast_x_at(moment), y_at(value)) for moment, value, _low, _high in forecast]
             path = QPainterPath(QPointF(divider_x, y_at(actual[-1][1] if actual else forecast[0][1])))
             for point in points:
                 path.lineTo(point)
